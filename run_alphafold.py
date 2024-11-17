@@ -632,6 +632,18 @@ def process_fold_input(
   return output
 
 
+def set_seeds(fold_input: folding_input.Input, num_seeds: int) -> folding_input.Input:
+    """Sets the random seeds for the fold input."""
+    rng = np.random.default_rng()
+    seeds = rng.integers(low=0, high=2**32, size=num_seeds).tolist()
+    return folding_input.Input(
+        name=fold_input.name,
+        chains=fold_input.chains,
+        rng_seeds=seeds,
+        bonded_atom_pairs=fold_input.bonded_atom_pairs,
+        user_ccd=fold_input.user_ccd
+    )
+
 def main(_):
   if _JAX_COMPILATION_CACHE_DIR.value is not None:
     jax.config.update(
