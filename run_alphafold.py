@@ -666,15 +666,16 @@ def process_fold_input(
             seed=seed,
             sample_idx=sample_idx
         )
+
+        ranking_scores.append((seed, sample_idx, ranking_score))
+        if max_ranking_score is None or ranking_score > max_ranking_score:
+            max_ranking_score = ranking_score
+            max_ranking_result = inference_result
+
       print(
           'Extracting and writing output structures for seed'
           f' {seed} took  {time.time() - writing_start_time:.2f} seconds.'
       )
-
-      ranking_scores.append((seed, sample_idx, ranking_score))
-      if max_ranking_score is None or ranking_score > max_ranking_score:
-          max_ranking_score = ranking_score
-          max_ranking_result = result.inference_results[0]
 
     if max_ranking_result is not None:  # True iff ranking_scores non-empty.
         job_name = fold_input.sanitised_name()
