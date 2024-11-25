@@ -1,6 +1,14 @@
 ![header](docs/header.jpg)
 
-# AlphaFold 3
+# Custom fork of AlphaFold 3 with some trivial modifications
+
+The modfications are:
+
+* --num_seeds flag added to run_alphafold.py to run multiple seeds automatically
+* Saving output files and printing logs as they come in
+* wiki doc page [docs/wiki.md](docs/wiki.md)
+
+____
 
 This package provides an implementation of the inference pipeline of AlphaFold
 3. See below for how to access the model parameters. You may only use AlphaFold
