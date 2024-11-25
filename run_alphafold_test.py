@@ -250,6 +250,7 @@ class InferenceTest(test_utils.StructureTestCase):
         ),
         output_dir=output_dir,
         buckets=None if bucket is None else [bucket],
+        return_all_inference_results=True,
     )
     logging.info('finished get_inference_result')
     expected_model_cif_filename = f'{fold_input.sanitised_name()}_model.cif'
