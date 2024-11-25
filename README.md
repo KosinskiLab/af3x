@@ -8,6 +8,7 @@ The modfications are:
 * Saving output files and printing logs as they come in
 * wiki doc page [docs/wiki.md](docs/wiki.md)
 
+Warning: This is a custom fork and not the official version. In active dev. Bugs expected. Use at your own risk. Fixes and PRs welcome.
 ____
 
 This package provides an implementation of the inference pipeline of AlphaFold
