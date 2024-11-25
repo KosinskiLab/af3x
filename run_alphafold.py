@@ -26,6 +26,7 @@ import datetime
 import functools
 import multiprocessing
 import os
+import sys
 import pathlib
 import shutil
 import string
@@ -57,6 +58,20 @@ import numpy as np
 _HOME_DIR = pathlib.Path(os.environ.get('HOME'))
 _DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
 _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
+
+class FlushingStream:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def write(self, data):
+        self.stream.write(data)
+        self.stream.flush()
+
+    def flush(self):
+        self.stream.flush()
+
+# Redirect sys.stdout globally
+sys.stdout = FlushingStream(sys.stdout)
 
 
 # Input and output paths.
@@ -385,69 +400,88 @@ class ResultsForSeed:
   embeddings: dict[str, np.ndarray] | None = None
 
 
-def predict_structure(
+def predict_structure_single(
     fold_input: folding_input.Input,
+    example: Sequence[features.BatchDict],
+    seed: int,
     model_runner: ModelRunner,
-    buckets: Sequence[int] | None = None,
-    conformer_max_iterations: int | None = None,
-) -> Sequence[ResultsForSeed]:
-  """Runs the full inference pipeline to predict structures for each seed."""
+) -> ResultsForSeed:
+    """
+    Runs inference and extracts output structures for a single seed.
+    
+    Args:
+        fold_input: Input object containing fold-specific data and parameters.
+        example: Featurised example for the given seed.
+        seed: Random seed for model inference.
+        model_runner: Model runner instance for performing inference.
+        
+    Returns:
+        ResultsForSeed containing the inference results for the seed.
+    """
+    print(f'Running model inference for seed {seed}...')
 
-  print(f'Featurising data with {len(fold_input.rng_seeds)} seed(s)...')
-  featurisation_start_time = time.time()
-  ccd = chemical_components.cached_ccd(user_ccd=fold_input.user_ccd)
-  featurised_examples = featurisation.featurise_input(
-      fold_input=fold_input,
-      buckets=buckets,
-      ccd=ccd,
-      verbose=True,
-      conformer_max_iterations=conformer_max_iterations,
-  )
-  print(
-      f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
-      f' {time.time() - featurisation_start_time:.2f} seconds.'
-  )
-  print(
-      'Running model inference and extracting output structure samples with'
-      f' {len(fold_input.rng_seeds)} seed(s)...'
-  )
-  all_inference_start_time = time.time()
-  all_inference_results = []
-  for seed, example in zip(fold_input.rng_seeds, featurised_examples):
-    print(f'Running model inference with seed {seed}...')
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key)
     print(
-        f'Running model inference with seed {seed} took'
-        f' {time.time() - inference_start_time:.2f} seconds.'
-    )
-    print(f'Extracting inference results with seed {seed}...')
-    extract_structures = time.time()
-    inference_results, embeddings = (
-        model_runner.extract_inference_results_and_maybe_embeddings(
-            batch=example, result=result, target_name=fold_input.name
-        )
-    )
-    print(
-        f'Extracting {len(inference_results)} inference samples with'
-        f' seed {seed} took {time.time() - extract_structures:.2f} seconds.'
+        f'Running model inference for seed {seed} took '
+        f'{time.time() - inference_start_time:.2f} seconds.'
     )
 
-    all_inference_results.append(
-        ResultsForSeed(
-            seed=seed,
-            inference_results=inference_results,
-            full_fold_input=fold_input,
-            embeddings=embeddings,
-        )
+    print(f'Extracting output structures (one per sample) for seed {seed}...')
+    extract_structures_start_time = time.time()
+    inference_results = model_runner.extract_structures(
+        batch=example, result=result, target_name=fold_input.name
     )
-  print(
-      'Running model inference and extracting output structures with'
-      f' {len(fold_input.rng_seeds)} seed(s) took'
-      f' {time.time() - all_inference_start_time:.2f} seconds.'
-  )
-  return all_inference_results
+    print(
+        f'Extracting output structures (one per sample) for seed {seed} took '
+        f'{time.time() - extract_structures_start_time:.2f} seconds.'
+    )
+
+    return ResultsForSeed(
+        seed=seed,
+        inference_results=inference_results,
+        full_fold_input=fold_input,
+    )
+
+def predict_structure(
+    fold_input: folding_input.Input,
+    model_runner: ModelRunner,
+    buckets: Sequence[int] | None = None,
+) -> Sequence[ResultsForSeed]:
+    """Runs the full inference pipeline to predict structures for each seed."""
+    
+    print(f'Featurising data for seeds {fold_input.rng_seeds}...')
+    featurisation_start_time = time.time()
+    ccd = chemical_components.cached_ccd(user_ccd=fold_input.user_ccd)
+    featurised_examples = featurisation.featurise_input(
+        fold_input=fold_input, buckets=buckets, ccd=ccd, verbose=True
+    )
+    print(
+        f'Featurising data for seeds {fold_input.rng_seeds} took '
+        f'{time.time() - featurisation_start_time:.2f} seconds.'
+    )
+    
+    all_inference_start_time = time.time()
+    all_inference_results = []
+
+    for seed, example in zip(fold_input.rng_seeds, featurised_examples):
+        result = predict_structure_single(
+            fold_input=fold_input,
+            example=example,
+            seed=seed,
+            model_runner=model_runner,
+        )
+        all_inference_results.append(result)
+
+    print(
+        'Running model inference and extracting output structures for seeds '
+        f'{fold_input.rng_seeds} took '
+        f'{time.time() - all_inference_start_time:.2f} seconds.'
+    )
+
+    return all_inference_results
+
 
 
 def write_fold_input_json(
@@ -462,56 +496,31 @@ def write_fold_input_json(
     f.write(fold_input.to_json())
 
 
-def write_outputs(
-    all_inference_results: Sequence[ResultsForSeed],
-    output_dir: os.PathLike[str] | str,
-    job_name: str,
-) -> None:
-  """Writes outputs to the specified output directory."""
-  ranking_scores = []
-  max_ranking_score = None
-  max_ranking_result = None
-
-  output_terms = (
-      pathlib.Path(alphafold3.cpp.__file__).parent / 'OUTPUT_TERMS_OF_USE.md'
-  ).read_text()
-
-  os.makedirs(output_dir, exist_ok=True)
-  for results_for_seed in all_inference_results:
-    seed = results_for_seed.seed
-    for sample_idx, result in enumerate(results_for_seed.inference_results):
-      sample_dir = os.path.join(output_dir, f'seed-{seed}_sample-{sample_idx}')
-      os.makedirs(sample_dir, exist_ok=True)
-      post_processing.write_output(
-          inference_result=result, output_dir=sample_dir
-      )
-      ranking_score = float(result.metadata['ranking_score'])
-      ranking_scores.append((seed, sample_idx, ranking_score))
-      if max_ranking_score is None or ranking_score > max_ranking_score:
-        max_ranking_score = ranking_score
-        max_ranking_result = result
-
-    if embeddings := results_for_seed.embeddings:
-      embeddings_dir = os.path.join(output_dir, f'seed-{seed}_embeddings')
-      os.makedirs(embeddings_dir, exist_ok=True)
-      post_processing.write_embeddings(
-          embeddings=embeddings, output_dir=embeddings_dir
-      )
-
-  if max_ranking_result is not None:  # True iff ranking_scores non-empty.
+def write_outputs_single(
+    inference_result,
+    output_dir: str,
+    seed: int,
+    sample_idx: int
+) -> float:
+    """
+    Writes a single inference result to its output directory.
+    
+    Args:
+        inference_result: The inference result to write.
+        output_dir: The parent output directory.
+        seed: The seed associated with the inference result.
+        sample_idx: The sample index for the inference result.        
+    Returns:
+        The ranking score for the inference result.
+    """
+    sample_dir = os.path.join(output_dir, f'seed-{seed}_sample-{sample_idx}')
+    os.makedirs(sample_dir, exist_ok=True)
     post_processing.write_output(
-        inference_result=max_ranking_result,
-        output_dir=output_dir,
-        # The output terms of use are the same for all seeds/samples.
-        terms_of_use=output_terms,
-        name=job_name,
+        inference_result=inference_result, 
+        output_dir=sample_dir
     )
-    # Save csv of ranking scores with seeds and sample indices, to allow easier
-    # comparison of ranking scores across different runs.
-    with open(os.path.join(output_dir, 'ranking_scores.csv'), 'wt') as f:
-      writer = csv.writer(f)
-      writer.writerow(['seed', 'sample', 'ranking_score'])
-      writer.writerows(ranking_scores)
+    ranking_score = float(inference_result.metadata['ranking_score'])
+    return ranking_score
 
 
 @overload
@@ -558,6 +567,7 @@ def process_fold_input(
     model_runner: ModelRunner | None,
     output_dir: os.PathLike[str] | str,
     buckets: Sequence[int] | None = None,
+    return_all_inference_results: bool = False,
     conformer_max_iterations: int | None = None,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
   """Runs data pipeline and/or inference on a single fold input.
@@ -614,17 +624,78 @@ def process_fold_input(
         f'Predicting 3D structure for {fold_input.name} with'
         f' {len(fold_input.rng_seeds)} seed(s)...'
     )
-    all_inference_results = predict_structure(
-        fold_input=fold_input,
-        model_runner=model_runner,
-        buckets=buckets,
-        conformer_max_iterations=conformer_max_iterations,
+
+    print(f'Featurising data for seeds {fold_input.rng_seeds}...')
+    featurisation_start_time = time.time()
+    ccd = chemical_components.cached_ccd(user_ccd=fold_input.user_ccd)
+    featurised_examples = featurisation.featurise_input(
+        fold_input=fold_input, buckets=buckets, ccd=ccd, verbose=True
     )
-    print(f'Writing outputs with {len(fold_input.rng_seeds)} seed(s)...')
-    write_outputs(
-        all_inference_results=all_inference_results,
-        output_dir=output_dir,
-        job_name=fold_input.sanitised_name(),
+    print(
+        f'Featurising data for seeds {fold_input.rng_seeds} took '
+        f'{time.time() - featurisation_start_time:.2f} seconds.'
+    )
+    
+    all_inference_start_time = time.time()
+    ranking_scores = []
+    max_ranking_score = None
+    max_ranking_result = None
+
+    output_terms = (
+        pathlib.Path(alphafold3.cpp.__file__).parent / 'OUTPUT_TERMS_OF_USE.md'
+    ).read_text()
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    all_inference_results = []
+    for seed, example in zip(fold_input.rng_seeds, featurised_examples):
+      result = predict_structure_single(
+          fold_input=fold_input,
+          example=example,
+          seed=seed,
+          model_runner=model_runner,
+      )
+      if return_all_inference_results:
+        all_inference_results.append(result)
+
+      writing_start_time = time.time()
+      for sample_idx, inference_result in enumerate(result.inference_results):
+        ranking_score = write_outputs_single(
+            inference_result=inference_result,
+            output_dir=output_dir,
+            seed=seed,
+            sample_idx=sample_idx
+        )
+      print(
+          'Extracting and writing output structures for seed'
+          f' {seed} took  {time.time() - writing_start_time:.2f} seconds.'
+      )
+
+      ranking_scores.append((seed, sample_idx, ranking_score))
+      if max_ranking_score is None or ranking_score > max_ranking_score:
+          max_ranking_score = ranking_score
+          max_ranking_result = result.inference_results[0]
+
+    if max_ranking_result is not None:  # True iff ranking_scores non-empty.
+        job_name = fold_input.sanitised_name()
+        post_processing.write_output(
+            inference_result=max_ranking_result,
+            output_dir=output_dir,
+            # The output terms of use are the same for all seeds/samples.
+            terms_of_use=output_terms,
+            name=job_name,
+        )
+        # Save csv of ranking scores with seeds and sample indices, to allow easier
+        # comparison of ranking scores across different runs.
+        with open(os.path.join(output_dir, 'ranking_scores.csv'), 'wt') as f:
+            writer = csv.writer(f)
+            writer.writerow(['seed', 'sample', 'ranking_score'])
+            writer.writerows(ranking_scores)
+
+    print(
+        'Running model inference and extracting output structures for seeds '
+        f'{fold_input.rng_seeds} took '
+        f'{time.time() - all_inference_start_time:.2f} seconds.'
     )
     output = all_inference_results
 
