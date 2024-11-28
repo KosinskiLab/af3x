@@ -5,6 +5,7 @@
 The modfications are:
 
 * --num_seeds flag added to run_alphafold.py to run multiple seeds automatically
+* --num_recycles flag added to run_alphafold.py to set the number of trunk recycles (default 10)
 * Saving output files and printing logs as they come in
 * wiki doc page [docs/wiki.md](docs/wiki.md)
 
