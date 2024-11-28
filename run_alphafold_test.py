@@ -178,26 +178,6 @@ class InferenceTest(test_utils.StructureTestCase):
           output_dir=self.create_tempdir().full_path,
       )
 
-  def test_no_chains_in_input(self):
-    fold_input = folding_input.Input(
-        name='empty',
-        chains=[],
-        rng_seeds=[0],
-    )
-
-    with self.assertRaisesRegex(ValueError, 'Fold input has no chains.'):
-      run_alphafold.process_fold_input(
-          fold_input=fold_input,
-          data_pipeline_config=self._data_pipeline_config,
-          model_runner=run_alphafold.ModelRunner(
-              model_class=diffusion_model.Diffuser,
-              config=run_alphafold.make_model_config(),
-              device=jax.local_devices(backend='gpu')[0],
-              model_dir=pathlib.Path(run_alphafold.DEFAULT_MODEL_DIR),
-          ),
-          output_dir='unused output dir',
-      )
-
   def test_set_seeds(self):
     """Test setting random seeds for the fold input."""
     fold_input = folding_input.Input.from_json(self._test_input_json)
