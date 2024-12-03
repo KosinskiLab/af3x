@@ -1,8 +1,14 @@
 # SMILES strings with a \ need to be escaped in input.json file?
 https://github.com/google-deepmind/alphafold3/issues/110
 
+# Are SMILES required in the User-provided CCD Format ?
+https://github.com/google-deepmind/alphafold3/issues/128
+
 # The model I get out doesn't always maintain the chirality
 https://github.com/google-deepmind/alphafold3/issues/107
+
+# Question about Post-Translational Modifications (PTMs) in Protein Prediction
+https://github.com/google-deepmind/alphafold3/issues/54
 
 # MMseqs2 vs jackhmmer - performance difference?
 https://github.com/google-deepmind/alphafold3/issues/125#issuecomment-2500808661
