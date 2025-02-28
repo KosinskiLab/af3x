@@ -424,24 +424,27 @@ def predict_structure_single(
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key)
     print(
-        f'Running model inference for seed {seed} took '
-        f'{time.time() - inference_start_time:.2f} seconds.'
+        f'Running model inference with seed {seed} took'
+        f' {time.time() - inference_start_time:.2f} seconds.'
     )
 
-    print(f'Extracting output structures (one per sample) for seed {seed}...')
-    extract_structures_start_time = time.time()
-    inference_results = model_runner.extract_structures(
-        batch=example, result=result, target_name=fold_input.name
+    print(f'Extracting inference results with seed {seed}...')
+    extract_structures = time.time()
+    inference_results, embeddings = (
+        model_runner.extract_inference_results_and_maybe_embeddings(
+            batch=example, result=result, target_name=fold_input.name
+        )
     )
     print(
-        f'Extracting output structures (one per sample) for seed {seed} took '
-        f'{time.time() - extract_structures_start_time:.2f} seconds.'
+        f'Extracting {len(inference_results)} inference samples with'
+        f' seed {seed} took {time.time() - extract_structures:.2f} seconds.'
     )
 
     return ResultsForSeed(
         seed=seed,
         inference_results=inference_results,
         full_fold_input=fold_input,
+        embeddings=embeddings,
     )
 
 def predict_structure(
@@ -672,6 +675,13 @@ def process_fold_input(
             max_ranking_score = ranking_score
             max_ranking_result = inference_result
 
+      if embeddings := result.embeddings:
+        embeddings_dir = os.path.join(output_dir, f'seed-{seed}_embeddings')
+        os.makedirs(embeddings_dir, exist_ok=True)
+        post_processing.write_embeddings(
+            embeddings=embeddings, output_dir=embeddings_dir
+        )
+
       print(
           'Extracting and writing output structures for seed'
           f' {seed} took  {time.time() - writing_start_time:.2f} seconds.'
@@ -702,19 +712,6 @@ def process_fold_input(
 
   print(f'Fold job {fold_input.name} done, output written to {output_dir}\n')
   return output
-
-
-def set_seeds(fold_input: folding_input.Input, num_seeds: int) -> folding_input.Input:
-    """Sets the random seeds for the fold input."""
-    rng = np.random.default_rng()
-    seeds = rng.integers(low=0, high=2**32, size=num_seeds).tolist()
-    return folding_input.Input(
-        name=fold_input.name,
-        chains=fold_input.chains,
-        rng_seeds=seeds,
-        bonded_atom_pairs=fold_input.bonded_atom_pairs,
-        user_ccd=fold_input.user_ccd
-    )
 
 def main(_):
   if _JAX_COMPILATION_CACHE_DIR.value is not None:

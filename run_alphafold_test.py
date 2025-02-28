@@ -178,28 +178,6 @@ class InferenceTest(test_utils.StructureTestCase):
           output_dir=self.create_tempdir().full_path,
       )
 
-  def test_set_seeds(self):
-    """Test setting random seeds for the fold input."""
-    fold_input = folding_input.Input.from_json(self._test_input_json)
-
-    num_seeds = 5
-    updated_fold_input = run_alphafold.set_seeds(fold_input, num_seeds)
-
-    self.assertLen(updated_fold_input.rng_seeds, num_seeds)
-    self.assertTrue(all(isinstance(seed, int) for seed in updated_fold_input.rng_seeds))
-    self.assertTrue(all(0 <= seed < 2**32 for seed in updated_fold_input.rng_seeds))
-
-  def test_set_seeds_different_seeds(self):
-    """Test that set_seeds generates different seeds for different inputs."""
-    fold_input_1 = folding_input.Input.from_json(self._test_input_json)
-    fold_input_2 = folding_input.Input.from_json(self._test_input_json)
-    num_seeds = 5
-
-    updated_fold_input_1 = run_alphafold.set_seeds(fold_input_1, num_seeds)
-    updated_fold_input_2 = run_alphafold.set_seeds(fold_input_2, num_seeds)
-
-    self.assertNotEqual(updated_fold_input_1.rng_seeds, updated_fold_input_2.rng_seeds)
-
   @parameterized.named_parameters(
       {
           'testcase_name': 'default_bucket',
