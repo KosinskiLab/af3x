@@ -286,6 +286,18 @@ _SAVE_EMBEDDINGS = flags.DEFINE_bool(
     'Whether to save the final trunk single and pair embeddings in the output.',
 )
 
+_SAMPLE_CROSSLINK_COMBINATIONS = flags.DEFINE_integer(
+  'sample_crosslink_combinations',
+  0,
+  'Sample combinations of N crosslinks and run inference for each combination.',
+)
+
+_REMOVE_OVERLAPPING_CROSSLINKS = flags.DEFINE_bool(
+  'remove_overlapping_crosslinks',
+  True,
+  'If set, remove any crosslinks that link to residues that already have'
+  ' crosslinks.',
+)
 
 def make_model_config(
     *,
@@ -791,6 +803,24 @@ def main(_):
   )
   print('\n' + '\n'.join(notice) + '\n')
 
+  fold_inputs = list(fold_inputs) # Convert to list to allow multiple iterations
+
+  if _RUN_INFERENCE.value and _SAMPLE_CROSSLINK_COMBINATIONS.value > 0:
+    out_fold_inputs = []
+    for fold_input in fold_inputs:
+      if fold_input.crosslinks:
+        combinations_fold_inputs = fold_input.sample_crosslink_combinations(
+          _SAMPLE_CROSSLINK_COMBINATIONS.value)
+        out_fold_inputs.extend(combinations_fold_inputs)
+      else:
+        out_fold_inputs.append(fold_input)
+    fold_inputs = out_fold_inputs
+
+  if _RUN_INFERENCE.value and _REMOVE_OVERLAPPING_CROSSLINKS.value:
+    for idx, fold_input in enumerate(fold_inputs):
+      if fold_input.crosslinks:
+        fold_inputs[idx] = fold_input.remove_overlapping_crosslinks()
+
   if _RUN_DATA_PIPELINE.value:
     expand_path = lambda x: replace_db_dir(x, DB_DIR.value)
     max_template_date = datetime.date.fromisoformat(_MAX_TEMPLATE_DATE.value)
@@ -849,6 +879,8 @@ def main(_):
     if _NUM_SEEDS.value is not None:
       print(f'Expanding fold job {fold_input.name} to {_NUM_SEEDS.value} seeds')
       fold_input = fold_input.with_multiple_seeds(_NUM_SEEDS.value)
+    if _RUN_INFERENCE.value and (fold_input.disulfide_bonds or fold_input.crosslinks):
+      fold_input = fold_input.expand_links()
     process_fold_input(
         fold_input=fold_input,
         data_pipeline_config=data_pipeline_config,

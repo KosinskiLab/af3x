@@ -380,6 +380,50 @@ class InferenceTest(test_utils.StructureTestCase):
     if any(rmsd > 1.4 for rmsd in actual_masked_rmsds):
       self.fail(f'Masked RMSD too high: {actual_masked_rmsds=}')
 
+class CrosslinkInferenceTest(InferenceTest):
+  """Test AlphaFold 3 inference."""
+
+  def setUp(self):
+    super().setUp()
+#   def __init__(self, methodName='runTest', test_input=None):
+#     super().__init__(methodName)
+    
+    test_input = {
+        'name': '5tgy',
+        'modelSeeds': [1234],
+        'sequences': [
+            {
+                'protein': {
+                    'id': 'A',
+                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'modifications': [],
+                    'unpairedMsa': None,
+                    'pairedMsa': None,
+                }
+            },
+            {
+                'protein': {
+                    'id': 'B',
+                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'modifications': [],
+                    'unpairedMsa': None,
+                    'pairedMsa': None,
+                }
+            }
+        ],
+        'crosslinks': [
+            {
+                'name': 'AzideDSBSO',
+                'residue_pairs': [
+                  (("A", 5), ("B", 5)),
+                  (("A", 81), ("B", 81)),
+                ]
+            }
+        ],
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    }
+    self._test_input_json = json.dumps(test_input)
 
 if __name__ == '__main__':
   absltest.main()

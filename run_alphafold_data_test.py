@@ -275,6 +275,197 @@ class DataPipelineTest(test_utils.StructureTestCase):
           f'${{DB_DIR}}/filename{num_db_dirs}.txt', db_dirs_posix
       )
 
+class CrosslinkDataPipelineTest(DataPipelineTest):
+  """Test AlphaFold 3 inference."""
+
+  def setUp(self):
+    super().setUp()
+    test_input = {
+        'name': '5tgy',
+        'modelSeeds': [1234],
+        'sequences': [
+            {
+                'protein': {
+                    'id': 'A',
+                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'modifications': [],
+                    'unpairedMsa': None,
+                    'pairedMsa': None,
+                }
+            },
+            {
+                'protein': {
+                    'id': 'B',
+                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'modifications': [],
+                    'unpairedMsa': None,
+                    'pairedMsa': None,
+                }
+            }
+        ],
+        'crosslinks': [
+            {
+                'name': 'azide-A-DSBSO',
+                'residue_pairs': [
+                  (("A", 5), ("B", 5)),
+                  (("A", 81), ("B", 81)),
+                ]
+            }
+        ],
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    }
+    self._test_input_json = json.dumps(test_input)
+    
+    self.expected_bonded_atom_pairs = (
+        (('A', 5, 'NZ'), ('C', 1, 'C16')),
+        (('B', 5, 'NZ'), ('C', 1, 'C31')),
+        (('A', 81, 'NZ'), ('D', 1, 'C16')),
+        (('B', 81, 'NZ'), ('D', 1, 'C31')),
+      )
+    
+    self.expected_ligands = [
+      {
+        "id": "C",
+        "ccd_ids": ("azide-A-DSBSO",)
+      },
+      {
+        "id": "D",
+        "ccd_ids": ("azide-A-DSBSO",)
+     }
+    ]
+
+  def compare_golden(self, result_path: str) -> None:
+    raise NotImplementedError
+  
+  @absltest.skip('Skipping test becuase compare_golden is not implemented')
+  def test_config(self):
+    return super().test_config()
+
+  @absltest.skip('Skipping test becuase compare_golden is not implemented')
+  def test_featurisation(self):
+    return super().test_featurisation()
+
+  def _check_crosslinks(self, fold_input):
+    self.assertIsInstance(fold_input.crosslinks, list)
+    for link_set in fold_input.crosslinks:
+      self.assertIsInstance(link_set, dict)
+
+  def test_add_xlinks(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = fold_input.expand_links()
+    self.assertEqual(len(fold_input.bonded_atom_pairs), len(self.expected_bonded_atom_pairs))
+    self.assertEqual(
+      fold_input.bonded_atom_pairs,
+      self.expected_bonded_atom_pairs
+    )
+    self.assertTrue(fold_input.user_ccd)
+    for expected_ligand, ligand in zip(self.expected_ligands, fold_input.ligands):
+      self.assertEqual(expected_ligand["id"], ligand.id)
+      self.assertEqual(expected_ligand["ccd_ids"], ligand.ccd_ids)
+
+    output_dir = self.create_tempdir()
+    run_alphafold.write_fold_input_json(fold_input, output_dir)
+    with open(
+        os.path.join(output_dir, f'{fold_input.sanitised_name()}_data.json'),
+        'rt',
+    ) as f:
+      out_json = json.load(f)
+
+class CrosslinkDataPipelineTest4G3Y(CrosslinkDataPipelineTest):
+  """Test AlphaFold 3 inference."""
+
+  def setUp(self):
+    super().setUp()
+    fn = testing_data.Data(
+        resources.ROOT
+        / 'test_data/crosslinks/4G3Y/4g3y_input.json').path()
+    with open(fn, 'r') as f:
+      self._test_input_json = f.read()
+
+      self.expected_bonded_atom_pairs_len = 24
+
+  def test_add_xlinks(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input_expanded = fold_input.expand_links()
+
+    self.assertEqual(len(fold_input_expanded.bonded_atom_pairs), self.expected_bonded_atom_pairs_len)
+
+    fold_input_noverlap = fold_input.remove_overlapping_crosslinks()
+    self.assertEqual(len(fold_input_noverlap.crosslinks[0]["residue_pairs"]), 4)
+
+    sampled_crosslinks = fold_input.sample_crosslink_combinations(1)
+    self.assertEqual(len(sampled_crosslinks), 12)
+    for sample in sampled_crosslinks:
+      self.assertEqual(len(sample.crosslinks[0]["residue_pairs"]), 1)
+      self._check_crosslinks(sample)
+    self.assertTrue(
+      any("4G3Y_DSSO_B208-C129" in sample.name for sample in sampled_crosslinks)
+    )
+
+    sampled_crosslinks = fold_input.sample_crosslink_combinations(2)
+    self.assertEqual(len(sampled_crosslinks), 66)
+    for sample in sampled_crosslinks:
+      self.assertEqual(len(sample.crosslinks[0]["residue_pairs"]), 2)
+      self._check_crosslinks(sample)
+    self.assertTrue(
+      any("4G3Y_DSSO_B208-C129_DSSO_A145-C129" in sample.name for sample in sampled_crosslinks)
+    )
+
+    sampled_crosslinks = fold_input.sample_crosslink_combinations(12)
+    self.assertEqual(len(sampled_crosslinks), 1)
+
+    with self.assertRaises(ValueError, msg="num_samples cannot be larger than the number of available crosslinks."):
+        sampled_crosslinks = fold_input.sample_crosslink_combinations(13)
+
+    sampled_crosslinks = fold_input.sample_crosslink_combinations(0)
+    self.assertEqual(len(sampled_crosslinks), 1)
+
+class DisulfideDataPipelineTest8WW0(DataPipelineTest):
+  """Test AlphaFold 3 inference."""
+
+  def setUp(self):
+    super().setUp()
+    fn = testing_data.Data(
+        resources.ROOT
+        / 'test_data/crosslinks/8WW0/8WW0_data_disulfide.json').path()
+    with open(fn, 'r') as f:
+      self._test_input_json = f.read()
+
+      self.expected_bonded_atom_pairs_len = 8
+
+  def compare_golden(self, result_path: str) -> None:
+    raise NotImplementedError
+  
+  @absltest.skip('Skipping test becuase compare_golden is not implemented')
+  def test_config(self):
+    return super().test_config()
+
+  @absltest.skip('Skipping test becuase compare_golden is not implemented')
+  def test_featurisation(self):
+    return super().test_featurisation()
+
+  def test_add_disulfide_bonds_expand(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = fold_input.expand_links()
+    chain = fold_input.protein_chains[0]
+
+    self.assertEqual(chain.sequence, 'SAPGEANAHWELFAEEGRLATGYRHAVAPPSA')
+    self.assertStartsWith(chain.unpaired_msa, '>query\nSAPGEANAHWELFAEEGRLATGYRHAVAPPSA')
+    self.assertStartsWith(chain.paired_msa, '>query\nSAPGEANAHWELFAEEGRLATGYRHAVAPPSA')
+    self.assertEqual(len(fold_input.bonded_atom_pairs), self.expected_bonded_atom_pairs_len)
+    self.assertEqual(len(fold_input.ligands), 4)
+    # self.assertIsNone(fold_input.disulfide_bonds)
+
+  def test_add_disulfide_bonds_noexpand(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    chain = fold_input.protein_chains[0]
+    self.assertEqual(chain.sequence, 'SCPGECNCHWELFCEEGRLCTGYRHCVCPPSC')
+    self.assertStartsWith(chain.unpaired_msa, '>query\nSCPGECNCHWELFCEEGRLCTGYRHCVCPPSC')
+    self.assertStartsWith(chain.paired_msa, '>query\nSCPGECNCHWELFCEEGRLCTGYRHCVCPPSC')
+    self.assertIsNone(fold_input.bonded_atom_pairs)
+    self.assertEqual(len(fold_input.ligands), 0)
+    # self.assertIsNotNone(fold_input.disulfide_bonds)
 
 if __name__ == '__main__':
   absltest.main()

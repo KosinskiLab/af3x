@@ -13,6 +13,7 @@
 from collections.abc import Collection, Iterator, Mapping, Sequence
 import dataclasses
 import gzip
+import itertools
 import json
 import logging
 import lzma
@@ -31,6 +32,8 @@ from alphafold3.structure import mmcif as mmcif_lib
 import rdkit.Chem as rd_chem
 import zstandard as zstd
 
+from alphafold3.crosslinks import crosslink_definitions
+from alphafold3.crosslinks import utils as xutils
 
 BondAtomId: TypeAlias = tuple[str, int, str]
 
@@ -846,6 +849,8 @@ class Input:
   rng_seeds: Sequence[int]
   bonded_atom_pairs: Sequence[tuple[BondAtomId, BondAtomId]] | None = None
   user_ccd: str | None = None
+  crosslinks: Sequence[Mapping[str, Any]] | None = None
+  disulfide_bonds: Sequence[Mapping[str, Any]] | None = None
 
   def __post_init__(self):
     if not self.rng_seeds:
@@ -1005,6 +1010,8 @@ class Input:
             'sequences',
             'bondedAtomPairs',
             'userCCD',
+            'crosslinks',
+            'disulfide_bonds',
         },
     )
 
@@ -1127,6 +1134,8 @@ class Input:
         rng_seeds=[int(seed) for seed in raw_json['modelSeeds']],
         bonded_atom_pairs=bonded_atom_pairs,
         user_ccd=raw_json.get('userCCD'),
+        crosslinks=raw_json.get('crosslinks'),
+        disulfide_bonds=raw_json.get('disulfide_bonds'),
     )
 
   @classmethod
@@ -1335,6 +1344,8 @@ class Input:
             'modelSeeds': self.rng_seeds,
             'bondedAtomPairs': self.bonded_atom_pairs,
             'userCCD': self.user_ccd,
+            'crosslinks': self.crosslinks,
+            'disulfide_bonds': self.disulfide_bonds,
         },
         indent=2,
     )
@@ -1370,6 +1381,190 @@ class Input:
         rng_seeds=list(range(self.rng_seeds[0], self.rng_seeds[0] + num_seeds)),
     )
 
+  @staticmethod
+  def mutate_seq(seq: str, aa: str, resid: int) -> str:
+      """Mutates a sequence by replacing the residue at the given position."""
+      if not 1 <= resid <= len(seq):
+          raise ValueError("Residue index out of range.")
+      seq_list = list(seq)
+      seq_list[resid - 1] = aa
+      return "".join(seq_list)
+
+
+  @staticmethod
+  def mutate_msa(msa: str | None, aa: str, resid: int) -> str:
+      """Mutates an MSA sequence at a given position, preserving all lines."""
+      if not msa:
+          return ''
+      # Use splitlines to handle different newline conventions.
+      lines = msa.splitlines()
+      if len(lines) < 2:
+          return msa  # No sequence line to mutate.
+      mutated_seq = Input.mutate_seq(lines[1], aa, resid)
+      # Preserve header and any extra lines.
+      return "\n".join([lines[0], mutated_seq] + lines[2:])
+
+  @staticmethod
+  def mutate_chain(chain: ProteinChain, resid: int) -> ProteinChain:
+      """Mutates cysteine at a given position to alanine in sequence and MSA."""
+      new_seq = Input.mutate_seq(chain.sequence, 'A', resid)
+      new_paired_msa = Input.mutate_msa(chain._paired_msa or '', 'A', resid)
+      new_unpaired_msa = Input.mutate_msa(chain._unpaired_msa or '', 'A', resid)
+      return ProteinChain(
+          id=chain.id,
+          sequence=new_seq,
+          ptms=chain._ptms,
+          unpaired_msa=new_unpaired_msa,
+          paired_msa=new_paired_msa,
+          templates=chain._templates or [],
+      )
+
+  def _apply_disulfide_mutations(self, chain: ProteinChain) -> ProteinChain:
+      """Applies all disulfide mutations for a given chain."""
+      for disulfide_bond in self.disulfide_bonds or []:
+          for (chain_id1, resid1), (chain_id2, resid2) in disulfide_bond['residue_pairs']:
+              if chain_id1 == chain.id:
+                  chain = self.mutate_chain(chain, resid1)
+              if chain_id2 == chain.id:
+                  chain = self.mutate_chain(chain, resid2)
+      return chain
+
+  def expand_links(self) -> Self:
+    """Expands crosslinks into bonded atom pairs.
+    For disulfide bonds, apply mutations to the protein chains
+    because disulfide bonds are represented as covalent S-S ligands bound to Ala residues.
+    """
+
+    all_links = list(self.crosslinks or [])
+    out_chains = list(self.chains)
+
+    if self.disulfide_bonds:
+        logging.info("Adding disulfide bonds")
+        # Set the bond name for each disulfide bond required for the links specifications below.
+        for disulfide_bond in self.disulfide_bonds:
+            disulfide_bond['name'] = 'S-S'
+
+        all_links.extend(self.disulfide_bonds)
+
+        # Apply disulfide mutations for all protein chains.
+        for idx, chain in enumerate(out_chains):
+            if isinstance(chain, ProteinChain):
+                out_chains[idx] = self._apply_disulfide_mutations(chain)
+
+    if all_links:
+        used_chain_ids = [c.id for c in self.chains]
+        ligands = []
+        user_ccd = self.user_ccd or ""
+        bonded_atom_pairs = self.bonded_atom_pairs or []
+
+        if self.crosslinks:
+          logging.info("Adding crosslinks")
+
+        for linkset in all_links:
+          linkset_name = linkset["name"]
+
+          #validate linkset_name
+          if linkset_name not in crosslink_definitions.CROSSLINKS:
+              raise ValueError(f"Crosslink {linkset_name} not found in crosslink_definitions.py")
+          
+          link_def = crosslink_definitions.get_link_definition(linkset_name)
+          
+          # add userCCD to the user_ccd string
+          user_ccd += link_def.user_ccd
+
+          # Find or create a ligand entry.
+          for entry in ligands:
+            if entry["ligand"]["ccdCode"] == link_def.ccd_code:
+              ligand_entry = entry
+              break
+          else:
+            ligand_entry = {"ligand": {"id": [], "ccdCode": link_def.ccd_code}}
+            ligands.append(ligand_entry)
+
+          # Use the handler to validate and create bond pairs.
+          handler = xutils.LinkHandler(
+              link_definition=link_def,
+              chains=out_chains,
+              residue_pairs=linkset["residue_pairs"],
+          )
+          bond_pairs, new_ligand_ids = handler.create_bonded_atom_pairs(
+              used_chain_ids=used_chain_ids
+          )
+          bonded_atom_pairs.extend(bond_pairs)
+          for lid in new_ligand_ids:
+              ligand_entry["ligand"]["id"].append(lid)
+              used_chain_ids.append(lid)
+
+        for ligand in ligands:
+            for ligand_id in ligand["ligand"]["id"]:
+                out_chains.append(
+                    Ligand(id=ligand_id, ccd_ids=[ligand["ligand"]["ccdCode"]])
+                )
+
+    return dataclasses.replace(
+        self,
+        chains=out_chains,
+        user_ccd=user_ccd,
+        bonded_atom_pairs=bonded_atom_pairs,
+        # disulfide_bonds=None,
+        # crosslinks=None,
+    )
+
+  def remove_overlapping_crosslinks(self) -> Self:
+    """Removes crosslinks that link residues already bonded by other crosslinks."""
+    if not self.crosslinks:
+        return self
+
+    seen_residues = set()
+    filtered_crosslinks = []
+
+    for linkset in self.crosslinks:
+      valid_pairs = []
+      for (chain_id1, resid1), (chain_id2, resid2) in linkset['residue_pairs']:
+        if (chain_id1, resid1) not in seen_residues and (chain_id2, resid2) not in seen_residues:
+          valid_pairs.append(((chain_id1, resid1), (chain_id2, resid2)))
+          seen_residues.add((chain_id1, resid1))
+          seen_residues.add((chain_id2, resid2))
+        else:
+          logging.info(f'Removing crosslink {linkset["name"]} between residues {(chain_id1, resid1)} and {(chain_id2, resid2)} due to overlap.')
+      if valid_pairs:
+        filtered_crosslinks.append({'name': linkset['name'], 'residue_pairs': valid_pairs})
+
+    return dataclasses.replace(self, crosslinks=filtered_crosslinks)
+  
+  def sample_crosslink_combinations(self, num_samples: int) -> Sequence[Self]:
+    """Samples a number of crosslink combinations from the input."""
+    if not self.crosslinks:
+        return [self]
+
+    all_crosslinks_flat = [
+      {'name': linkset['name'], 'residue_pair': residue_pair}
+      for linkset in self.crosslinks or []
+      for residue_pair in linkset['residue_pairs']
+    ]
+
+    if num_samples > len(all_crosslinks_flat):
+        raise ValueError("num_samples cannot be larger than the number of available crosslinks.")    
+
+    combinations = itertools.combinations(all_crosslinks_flat, num_samples)
+    sampled_inputs = []
+    for combination in combinations:
+      crosslinks = {}
+      for link in combination:
+        crosslinks.setdefault(link['name'], []).append(link['residue_pair'])
+      crosslinks = [{'name': name, 'residue_pairs': pairs} for name, pairs in crosslinks.items()]
+
+      crosslink_names = "_".join(
+          f"{link['name']}_{link['residue_pair'][0][0]}{link['residue_pair'][0][1]}-{link['residue_pair'][1][0]}{link['residue_pair'][1][1]}"
+          for link in combination
+      )
+      new_name = f"{self.name}_{crosslink_names}"
+
+      sampled_inputs.append(
+          dataclasses.replace(self, name=new_name, crosslinks=crosslinks)
+      )
+    
+    return sampled_inputs
 
 def load_fold_inputs_from_path(json_path: pathlib.Path) -> Iterator[Input]:
   """Loads multiple fold inputs from a JSON string."""
@@ -1398,7 +1593,6 @@ def load_fold_inputs_from_path(json_path: pathlib.Path) -> Iterator[Input]:
       raise ValueError(
           f'Failed to load input from {json_path} (AlphaFold 3 dialect): {e}'
       ) from e
-
 
 def load_fold_inputs_from_dir(input_dir: pathlib.Path) -> Iterator[Input]:
   """Loads multiple fold inputs from all JSON files in a given input_dir.
