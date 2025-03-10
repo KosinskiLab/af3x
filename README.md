@@ -26,7 +26,7 @@ Usage:
     pip install -r dev-requirements.txt
 
     # Install the package in editable mode without dependencies
-    pip install --no-deps .
+    pip install -e . --no-deps 
 
     build_data
     ```
@@ -142,7 +142,9 @@ By this point you might know how it will be done.
 
 ## How to add your own crosslinker type?
 
-Find the fle `af3x/src/alphafold3/crosslinks/crosslink_definitions.py` and add your own crosslinker definition by following the provided examples. Reinstall the package with `pip install --no-deps .` and you are ready to go.
+Find the file `af3x/src/alphafold3/crosslinks/crosslink_definitions.py` and add your own crosslinker definition by following the provided examples. 
+>[!NOTE]
+>The package should be installed in editable mode `pip install -e . --no-deps` Otherwise, you will need to rerun: `pip install --no-deps .` after adding a new crosslinker.
 
 ## Test data
 The test data is available in `af3x/src/alphafold3/test_data/crosslinks` folder.
