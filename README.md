@@ -97,7 +97,12 @@ Usage:
     - DSS
     - DSG
     - BS3
+    - BS2G
     - azide-A-DSBSO
+    - DSBU
+    - PHOX
+    - BSPEG5
+    - BSPEG9
 1. Run AlphaFold 3 as per the instructions in the original README below. Crosslinks will be added automatically.
 
     Key flags:

@@ -244,7 +244,7 @@ _pdbx_chem_comp_descriptor.descriptor 'CC1(OCC(CO1)(CS(=O)CCC(=O)ON2C(=O)CCC2=O)
             }
         }
     },  
-        "DSSO": {
+    "DSSO": {
         "ccdCode": "DSSO",
         "userCCD": """data_DSSO
 #
@@ -392,8 +392,7 @@ _pdbx_chem_comp_descriptor.descriptor 'DUPA'
             }
         },
     },
-
-        "DSS": {
+    "DSS": {
         "ccdCode": "DSS",
         "userCCD": """data_DSS
 #
@@ -548,10 +547,8 @@ _pdbx_chem_comp_descriptor.descriptor 'C1CC(=O)N(C1=O)OC(=O)CCCCCCC(=O)ON2C(=O)C
                 "atomname": "C17",
             }
         },
-    },   
-
-
-        "BS3": {
+    },
+    "BS3": {
         "ccdCode": "BS3",
         "userCCD": """data_BS3
 #
@@ -707,7 +704,7 @@ _pdbx_chem_comp_descriptor.descriptor 'C1CC(=O)N(C1=O)OC(=O)CCCCCCC(=O)ON2C(=O)C
             }
         }
     },
-        "DSG": {
+    "DSG": {
         "ccdCode": "DSG",
         "userCCD": """data_DSG
 #
@@ -845,7 +842,347 @@ _pdbx_chem_comp_descriptor.descriptor 'C1CC(=O)N(C1=O)OC(=O)CCCC(=O)ON2C(=O)CCC2
             }
         }
     },
-        "S-S": {
+    "BS2G": {
+        "ccdCode": "BS2G",
+        "userCCD": "data_BS2G\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          100.12\n_chem_comp.id                      BS2G\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nO1 0 BS2G N 2.765  -0.850 1.717  O \nC1 0 BS2G N 2.172  -0.628 0.651  C \nC2 0 BS2G N 0.793  -0.058 0.640  C \nC3 0 BS2G N 0.268  0.127  -0.760 C \nC4 0 BS2G N -1.148 0.714  -0.708 C \nC5 0 BS2G N -2.069 -0.194 0.031  C \nO2 0 BS2G N -2.087 -1.250 0.613  O \nH1 0 BS2G N 2.850  -0.927 -0.162 H \nH2 0 BS2G N 0.125  -0.754 1.180  H \nH3 0 BS2G N 0.799  0.890  1.204  H \nH4 0 BS2G N 0.905  0.884  -1.259 H \nH5 0 BS2G N 0.241  -0.846 -1.279 H \nH6 0 BS2G N -1.517 0.934  -1.715 H \nH7 0 BS2G N -1.052 1.698  -0.195 H \nH8 0 BS2G N -3.045 0.262  0.040  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nO1 C1 BS2G N N DOUB \nC1 C2 BS2G N N SING \nC2 C3 BS2G N N SING \nC3 C4 BS2G N N SING \nC4 C5 BS2G N N SING \nC5 O2 BS2G N N DOUB \nC1 H1 BS2G N N SING \nC2 H2 BS2G N N SING \nC2 H3 BS2G N N SING \nC3 H4 BS2G N N SING \nC3 H5 BS2G N N SING \nC4 H6 BS2G N N SING \nC4 H7 BS2G N N SING \nC5 H8 BS2G N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BS2G",
+                "atomname": "C1"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BS2G",
+                "atomname": "C5"
+            }
+        }
+    },
+    "DSBU": {
+        "ccdCode": "DSBU",
+        "userCCD": "data_DSBU\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          200.24\n_chem_comp.id                      DSBU\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nO1  0 DSBU N -4.331 -1.874 0.233  O \nC1  0 DSBU N -4.916 -0.846 0.483  C \nC2  0 DSBU N -4.724 0.608  0.263  C \nC3  0 DSBU N -3.443 0.899  -0.478 C \nC4  0 DSBU N -2.220 0.410  0.258  C \nN1  0 DSBU N -1.057 0.753  -0.564 N \nC5  0 DSBU N 0.279  0.443  -0.181 C \nO2  0 DSBU N 0.406  -0.148 0.913  O \nN2  0 DSBU N 1.380  0.783  -0.991 N \nC6  0 DSBU N 2.732  0.474  -0.612 C \nC7  0 DSBU N 2.980  -1.006 -0.430 C \nC8  0 DSBU N 4.431  -1.281 -0.028 C \nC9  0 DSBU N 4.784  -0.617 1.244  C \nO3  0 DSBU N 5.017  0.567  1.287  O \nH1  0 DSBU N -5.840 -1.099 1.021  H \nH2  0 DSBU N -5.556 0.955  -0.362 H \nH3  0 DSBU N -4.760 1.190  1.204  H \nH4  0 DSBU N -3.361 2.010  -0.563 H \nH5  0 DSBU N -3.461 0.501  -1.493 H \nH6  0 DSBU N -2.254 -0.689 0.410  H \nH7  0 DSBU N -2.168 0.881  1.271  H \nH8  0 DSBU N -1.152 1.255  -1.497 H \nH9  0 DSBU N 1.199  1.284  -1.907 H \nH10 0 DSBU N 2.949  1.048  0.308  H \nH11 0 DSBU N 3.445  0.820  -1.376 H \nH12 0 DSBU N 2.373  -1.323 0.454  H \nH13 0 DSBU N 2.794  -1.587 -1.331 H \nH14 0 DSBU N 4.527  -2.385 0.038  H \nH15 0 DSBU N 5.082  -0.915 -0.869 H \nH16 0 DSBU N 4.864  -1.112 2.222  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nO1 C1  DSBU N N DOUB \nC1 C2  DSBU N N SING \nC2 C3  DSBU N N SING \nC3 C4  DSBU N N SING \nC4 N1  DSBU N N SING \nN1 C5  DSBU N N SING \nC5 O2  DSBU N N DOUB \nC5 N2  DSBU N N SING \nN2 C6  DSBU N N SING \nC6 C7  DSBU N N SING \nC7 C8  DSBU N N SING \nC8 C9  DSBU N N SING \nC9 O3  DSBU N N DOUB \nC1 H1  DSBU N N SING \nC2 H2  DSBU N N SING \nC2 H3  DSBU N N SING \nC3 H4  DSBU N N SING \nC3 H5  DSBU N N SING \nC4 H6  DSBU N N SING \nC4 H7  DSBU N N SING \nN1 H8  DSBU N N SING \nN2 H9  DSBU N N SING \nC6 H10 DSBU N N SING \nC6 H11 DSBU N N SING \nC7 H12 DSBU N N SING \nC7 H13 DSBU N N SING \nC8 H14 DSBU N N SING \nC8 H15 DSBU N N SING \nC9 H16 DSBU N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "DSBU",
+                "atomname": "C1"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "DSBU",
+                "atomname": "C9"
+            }
+        }
+    },
+    "PHOX": {
+        "ccdCode": "PHOX",
+        "userCCD": "data_PHOX\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          214.11\n_chem_comp.id                      PHOX\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nO1 0 PHOX N -3.743 -0.665 1.180  O \nC1 0 PHOX N -2.616 -1.217 1.131  C \nC2 0 PHOX N -1.467 -0.533 0.601  C \nC3 0 PHOX N -1.703 0.748  0.163  C \nC4 0 PHOX N -0.637 1.478  -0.366 C \nC5 0 PHOX N -0.855 2.839  -0.839 C \nO2 0 PHOX N -2.018 3.316  -0.753 O \nC6 0 PHOX N 0.605  0.879  -0.423 C \nC7 0 PHOX N 0.803  -0.398 0.022  C \nP1 0 PHOX N 2.417  -1.204 -0.042 P \nO3 0 PHOX N 2.570  -1.989 1.247  O \nO4 0 PHOX N 2.452  -2.273 -1.351 O \nO5 0 PHOX N 3.666  -0.077 -0.103 O \nC8 0 PHOX N -0.237 -1.160 0.557  C \nH1 0 PHOX N -2.787 -2.198 1.549  H \nH2 0 PHOX N -2.669 1.228  0.202  H \nH3 0 PHOX N -0.008 3.378  -1.243 H \nH4 0 PHOX N 1.430  1.444  -0.832 H \nH5 0 PHOX N 1.599  -2.214 -1.877 H \nH6 0 PHOX N 3.328  0.789  0.256  H \nH7 0 PHOX N -0.129 -2.172 0.922  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nO1 C1 PHOX N N DOUB \nC1 C2 PHOX N N SING \nC2 C3 PHOX Y N DOUB \nC3 C4 PHOX Y N SING \nC4 C5 PHOX N N SING \nC5 O2 PHOX N N DOUB \nC4 C6 PHOX Y N DOUB \nC6 C7 PHOX Y N SING \nC7 P1 PHOX N N SING \nP1 O3 PHOX N N DOUB \nP1 O4 PHOX N N SING \nP1 O5 PHOX N N SING \nC7 C8 PHOX Y N DOUB \nC8 C2 PHOX Y N SING \nC1 H1 PHOX N N SING \nC3 H2 PHOX N N SING \nC5 H3 PHOX N N SING \nC6 H4 PHOX N N SING \nO4 H5 PHOX N N SING \nO5 H6 PHOX N N SING \nC8 H7 PHOX N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "PHOX",
+                "atomname": "C1"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "PHOX",
+                "atomname": "C5"
+            }
+        }
+    },
+    "BSPEG5": {
+        "ccdCode": "BSPEG5",
+        "userCCD": "data_BSPEG5\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          306.35\n_chem_comp.id                      BSPEG5\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nO1  0 BSPEG5 N -7.534 0.670  2.666  O \nC1  0 BSPEG5 N -8.110 1.318  1.789  C \nC2  0 BSPEG5 N -7.254 1.519  0.590  C \nC3  0 BSPEG5 N -5.936 0.835  0.879  C \nO2  0 BSPEG5 N -5.047 0.959  -0.184 O \nC4  0 BSPEG5 N -3.865 0.277  0.221  C \nC5  0 BSPEG5 N -2.823 0.337  -0.842 C \nO3  0 BSPEG5 N -1.671 -0.309 -0.464 O \nC6  0 BSPEG5 N -1.821 -1.644 -0.191 C \nC7  0 BSPEG5 N -0.511 -2.280 0.183  C \nO4  0 BSPEG5 N 0.415  -2.207 -0.806 O \nC8  0 BSPEG5 N 0.795  -0.979 -1.229 C \nC9  0 BSPEG5 N 1.899  -1.201 -2.271 C \nO5  0 BSPEG5 N 2.984  -1.859 -1.773 O \nC10 0 BSPEG5 N 3.659  -1.283 -0.735 C \nC11 0 BSPEG5 N 4.226  0.061  -1.025 C \nO6  0 BSPEG5 N 4.905  0.631  0.032  O \nC12 0 BSPEG5 N 5.984  -0.101 0.477  C \nC13 0 BSPEG5 N 6.619  0.650  1.629  C \nC14 0 BSPEG5 N 7.064  1.999  1.140  C \nO7  0 BSPEG5 N 6.887  2.326  -0.029 O \nH1  0 BSPEG5 N -9.127 1.663  1.960  H \nH2  0 BSPEG5 N -7.672 1.053  -0.327 H \nH3  0 BSPEG5 N -7.095 2.595  0.378  H \nH4  0 BSPEG5 N -6.148 -0.255 0.979  H \nH5  0 BSPEG5 N -5.431 1.264  1.766  H \nH6  0 BSPEG5 N -3.492 0.711  1.167  H \nH7  0 BSPEG5 N -4.233 -0.784 0.344  H \nH8  0 BSPEG5 N -3.184 -0.206 -1.768 H \nH9  0 BSPEG5 N -2.549 1.379  -1.125 H \nH10 0 BSPEG5 N -2.273 -2.192 -1.064 H \nH11 0 BSPEG5 N -2.588 -1.823 0.628  H \nH12 0 BSPEG5 N -0.735 -3.363 0.440  H \nH13 0 BSPEG5 N -0.120 -1.791 1.129  H \nH14 0 BSPEG5 N 0.013  -0.424 -1.840 H \nH15 0 BSPEG5 N 1.126  -0.339 -0.393 H \nH16 0 BSPEG5 N 2.123  -0.252 -2.799 H \nH17 0 BSPEG5 N 1.433  -1.873 -3.023 H \nH18 0 BSPEG5 N 4.533  -1.974 -0.545 H \nH19 0 BSPEG5 N 3.084  -1.282 0.226  H \nH20 0 BSPEG5 N 4.812  0.010  -1.961 H \nH21 0 BSPEG5 N 3.388  0.771  -1.264 H \nH22 0 BSPEG5 N 5.623  -1.068 0.925  H \nH23 0 BSPEG5 N 6.770  -0.300 -0.255 H \nH24 0 BSPEG5 N 5.842  0.811  2.389  H \nH25 0 BSPEG5 N 7.514  0.100  2.013  H \nH26 0 BSPEG5 N 7.523  2.549  1.964  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nO1  C1  BSPEG5 N N DOUB \nC1  C2  BSPEG5 N N SING \nC2  C3  BSPEG5 N N SING \nC3  O2  BSPEG5 N N SING \nO2  C4  BSPEG5 N N SING \nC4  C5  BSPEG5 N N SING \nC5  O3  BSPEG5 N N SING \nO3  C6  BSPEG5 N N SING \nC6  C7  BSPEG5 N N SING \nC7  O4  BSPEG5 N N SING \nO4  C8  BSPEG5 N N SING \nC8  C9  BSPEG5 N N SING \nC9  O5  BSPEG5 N N SING \nO5  C10 BSPEG5 N N SING \nC10 C11 BSPEG5 N N SING \nC11 O6  BSPEG5 N N SING \nO6  C12 BSPEG5 N N SING \nC12 C13 BSPEG5 N N SING \nC13 C14 BSPEG5 N N SING \nC14 O7  BSPEG5 N N DOUB \nC1  H1  BSPEG5 N N SING \nC2  H2  BSPEG5 N N SING \nC2  H3  BSPEG5 N N SING \nC3  H4  BSPEG5 N N SING \nC3  H5  BSPEG5 N N SING \nC4  H6  BSPEG5 N N SING \nC4  H7  BSPEG5 N N SING \nC5  H8  BSPEG5 N N SING \nC5  H9  BSPEG5 N N SING \nC6  H10 BSPEG5 N N SING \nC6  H11 BSPEG5 N N SING \nC7  H12 BSPEG5 N N SING \nC7  H13 BSPEG5 N N SING \nC8  H14 BSPEG5 N N SING \nC8  H15 BSPEG5 N N SING \nC9  H16 BSPEG5 N N SING \nC9  H17 BSPEG5 N N SING \nC10 H18 BSPEG5 N N SING \nC10 H19 BSPEG5 N N SING \nC11 H20 BSPEG5 N N SING \nC11 H21 BSPEG5 N N SING \nC12 H22 BSPEG5 N N SING \nC12 H23 BSPEG5 N N SING \nC13 H24 BSPEG5 N N SING \nC13 H25 BSPEG5 N N SING \nC14 H26 BSPEG5 N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BSPEG5",
+                "atomname": "C1"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BSPEG5",
+                "atomname": "C14"
+            }
+        }
+    },
+    "BSPEG9": {
+        "ccdCode": "BSPEG9",
+        "userCCD": "data_BSPEG9\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          482.57\n_chem_comp.id                      BSPEG9\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nO1  0 BSPEG9 N 9.901   1.725  5.164  O \nC1  0 BSPEG9 N 10.882  1.355  4.544  C \nC2  0 BSPEG9 N 11.044  1.845  3.150  C \nC3  0 BSPEG9 N 10.041  1.042  2.293  C \nO2  0 BSPEG9 N 8.805   1.335  2.823  O \nC4  0 BSPEG9 N 7.809   0.653  2.155  C \nC5  0 BSPEG9 N 7.744   1.008  0.716  C \nO3  0 BSPEG9 N 6.756   0.361  -0.018 O \nC6  0 BSPEG9 N 5.497   0.626  0.439  C \nC7  0 BSPEG9 N 4.421   -0.069 -0.402 C \nO4  0 BSPEG9 N 4.462   0.322  -1.697 O \nC8  0 BSPEG9 N 3.544   -0.201 -2.540 C \nC9  0 BSPEG9 N 3.505   -1.674 -2.731 C \nO5  0 BSPEG9 N 3.251   -2.465 -1.668 O \nC10 0 BSPEG9 N 2.054   -2.391 -1.029 C \nC11 0 BSPEG9 N 0.918   -2.742 -1.932 C \nO6  0 BSPEG9 N -0.284  -2.685 -1.294 O \nC12 0 BSPEG9 N -0.647  -1.481 -0.782 C \nC13 0 BSPEG9 N -0.762  -0.430 -1.842 C \nO7  0 BSPEG9 N -1.683  -0.684 -2.827 O \nC14 0 BSPEG9 N -2.982  -0.832 -2.392 C \nC15 0 BSPEG9 N -3.553  0.345  -1.677 C \nO8  0 BSPEG9 N -4.858  0.166  -1.257 O \nC16 0 BSPEG9 N -5.759  -0.078 -2.260 C \nC17 0 BSPEG9 N -7.165  -0.230 -1.667 C \nO9  0 BSPEG9 N -7.452  0.950  -1.035 O \nC18 0 BSPEG9 N -8.719  0.973  -0.474 C \nC19 0 BSPEG9 N -8.981  -0.066 0.558  C \nO10 0 BSPEG9 N -8.201  -0.074 1.660  O \nC20 0 BSPEG9 N -8.146  0.986  2.489  C \nC21 0 BSPEG9 N -9.388  1.435  3.167  C \nC22 0 BSPEG9 N -10.460 1.862  2.238  C \nO11 0 BSPEG9 N -11.307 2.202  1.403  O \nH1  0 BSPEG9 N 11.692  0.687  4.880  H \nH2  0 BSPEG9 N 12.036  1.695  2.725  H \nH3  0 BSPEG9 N 10.734  2.923  3.085  H \nH4  0 BSPEG9 N 10.197  1.364  1.244  H \nH5  0 BSPEG9 N 10.341  -0.008 2.344  H \nH6  0 BSPEG9 N 8.025   -0.437 2.327  H \nH7  0 BSPEG9 N 6.817   0.915  2.634  H \nH8  0 BSPEG9 N 8.675   0.869  0.136  H \nH9  0 BSPEG9 N 7.475   2.104  0.656  H \nH10 0 BSPEG9 N 5.341   1.720  0.460  H \nH11 0 BSPEG9 N 5.333   0.236  1.467  H \nH12 0 BSPEG9 N 4.576   -1.165 -0.331 H \nH13 0 BSPEG9 N 3.459   0.278  0.053  H \nH14 0 BSPEG9 N 3.773   0.232  -3.569 H \nH15 0 BSPEG9 N 2.509   0.226  -2.347 H \nH16 0 BSPEG9 N 4.517   -1.954 -3.146 H \nH17 0 BSPEG9 N 2.799   -1.872 -3.590 H \nH18 0 BSPEG9 N 1.905   -1.443 -0.485 H \nH19 0 BSPEG9 N 2.067   -3.174 -0.210 H \nH20 0 BSPEG9 N 1.044   -3.808 -2.287 H \nH21 0 BSPEG9 N 0.963   -2.130 -2.858 H \nH22 0 BSPEG9 N -1.643  -1.645 -0.262 H \nH23 0 BSPEG9 N -0.005  -1.070 0.023  H \nH24 0 BSPEG9 N -1.008  0.536  -1.308 H \nH25 0 BSPEG9 N 0.221   -0.316 -2.356 H \nH26 0 BSPEG9 N -3.018  -1.744 -1.769 H \nH27 0 BSPEG9 N -3.595  -0.983 -3.323 H \nH28 0 BSPEG9 N -2.956  0.647  -0.789 H \nH29 0 BSPEG9 N -3.551  1.237  -2.339 H \nH30 0 BSPEG9 N -5.815  0.765  -2.972 H \nH31 0 BSPEG9 N -5.545  -0.987 -2.863 H \nH32 0 BSPEG9 N -7.065  -1.074 -0.942 H \nH33 0 BSPEG9 N -7.892  -0.484 -2.458 H \nH34 0 BSPEG9 N -9.417  0.767  -1.342 H \nH35 0 BSPEG9 N -8.886  2.021  -0.154 H \nH36 0 BSPEG9 N -10.087 -0.127 0.784  H \nH37 0 BSPEG9 N -8.809  -1.061 0.039  H \nH38 0 BSPEG9 N -7.430  0.701  3.324  H \nH39 0 BSPEG9 N -7.610  1.881  2.039  H \nH40 0 BSPEG9 N -9.205  2.328  3.831  H \nH41 0 BSPEG9 N -9.822  0.682  3.857  H \nH42 0 BSPEG9 N -11.427 2.219  2.517  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nO1  C1  BSPEG9 N N DOUB \nC1  C2  BSPEG9 N N SING \nC2  C3  BSPEG9 N N SING \nC3  O2  BSPEG9 N N SING \nO2  C4  BSPEG9 N N SING \nC4  C5  BSPEG9 N N SING \nC5  O3  BSPEG9 N N SING \nO3  C6  BSPEG9 N N SING \nC6  C7  BSPEG9 N N SING \nC7  O4  BSPEG9 N N SING \nO4  C8  BSPEG9 N N SING \nC8  C9  BSPEG9 N N SING \nC9  O5  BSPEG9 N N SING \nO5  C10 BSPEG9 N N SING \nC10 C11 BSPEG9 N N SING \nC11 O6  BSPEG9 N N SING \nO6  C12 BSPEG9 N N SING \nC12 C13 BSPEG9 N N SING \nC13 O7  BSPEG9 N N SING \nO7  C14 BSPEG9 N N SING \nC14 C15 BSPEG9 N N SING \nC15 O8  BSPEG9 N N SING \nO8  C16 BSPEG9 N N SING \nC16 C17 BSPEG9 N N SING \nC17 O9  BSPEG9 N N SING \nO9  C18 BSPEG9 N N SING \nC18 C19 BSPEG9 N N SING \nC19 O10 BSPEG9 N N SING \nO10 C20 BSPEG9 N N SING \nC20 C21 BSPEG9 N N SING \nC21 C22 BSPEG9 N N SING \nC22 O11 BSPEG9 N N DOUB \nC1  H1  BSPEG9 N N SING \nC2  H2  BSPEG9 N N SING \nC2  H3  BSPEG9 N N SING \nC3  H4  BSPEG9 N N SING \nC3  H5  BSPEG9 N N SING \nC4  H6  BSPEG9 N N SING \nC4  H7  BSPEG9 N N SING \nC5  H8  BSPEG9 N N SING \nC5  H9  BSPEG9 N N SING \nC6  H10 BSPEG9 N N SING \nC6  H11 BSPEG9 N N SING \nC7  H12 BSPEG9 N N SING \nC7  H13 BSPEG9 N N SING \nC8  H14 BSPEG9 N N SING \nC8  H15 BSPEG9 N N SING \nC9  H16 BSPEG9 N N SING \nC9  H17 BSPEG9 N N SING \nC10 H18 BSPEG9 N N SING \nC10 H19 BSPEG9 N N SING \nC11 H20 BSPEG9 N N SING \nC11 H21 BSPEG9 N N SING \nC12 H22 BSPEG9 N N SING \nC12 H23 BSPEG9 N N SING \nC13 H24 BSPEG9 N N SING \nC13 H25 BSPEG9 N N SING \nC14 H26 BSPEG9 N N SING \nC14 H27 BSPEG9 N N SING \nC15 H28 BSPEG9 N N SING \nC15 H29 BSPEG9 N N SING \nC16 H30 BSPEG9 N N SING \nC16 H31 BSPEG9 N N SING \nC17 H32 BSPEG9 N N SING \nC17 H33 BSPEG9 N N SING \nC18 H34 BSPEG9 N N SING \nC18 H35 BSPEG9 N N SING \nC19 H36 BSPEG9 N N SING \nC19 H37 BSPEG9 N N SING \nC20 H38 BSPEG9 N N SING \nC20 H39 BSPEG9 N N SING \nC21 H40 BSPEG9 N N SING \nC21 H41 BSPEG9 N N SING \nC22 H42 BSPEG9 N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BSPEG9",
+                "atomname": "C1"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "BSPEG9",
+                "atomname": "C22"
+            }
+        }
+    },
+    "S-S": {
         "ccdCode": "S-S",
         "userCCD": """data_S-S
 #
