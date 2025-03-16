@@ -70,6 +70,9 @@ class FlushingStream:
     def flush(self):
         self.stream.flush()
 
+    def isatty(self):
+        return self.stream.isatty()
+
 # Redirect sys.stdout globally
 sys.stdout = FlushingStream(sys.stdout)
 
