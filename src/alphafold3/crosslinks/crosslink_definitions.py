@@ -22,7 +22,8 @@
 #
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Self, Callable
+from alphafold3.crosslinks import dynamic_corsslink
 
 CROSSLINKS = {
 
@@ -1280,7 +1281,7 @@ class LinkDefinition:
     bond2: Dict[str, Any]
 
     @classmethod
-    def from_dict(cls, name: str, definition: Dict[str, Any]) -> "LinkDefinition":
+    def from_dict(cls, name: str, definition: Dict[str, Any]) -> Self:
         return cls(
             name=name,
             ccd_code=definition["ccdCode"],
@@ -1288,6 +1289,19 @@ class LinkDefinition:
             bond1=definition["bond1"],
             bond2=definition["bond2"],
         )
+
+    @classmethod
+    def from_dynamic_name(cls, name: str) -> Self:
+        """Creates a LinkDefinition object from the link name"""
+        link_type_name, _ = dynamic_corsslink.dynamic_xlinkname_processing(name)
+        if not link_type_name in dynamic_corsslink.REGISTERED_LINK_TYPES:
+            raise ValueError(f"Dynamic crosslink '{name}' is not supported.")
+        definition = dynamic_corsslink.REGISTERED_LINK_TYPES[link_type_name](name)[name] # TODO: correct syntax
+        return cls(name=name,
+            ccd_code=definition["ccdCode"],
+            user_ccd=definition["userCCD"],
+            bond1=definition["bond1"],
+            bond2=definition["bond2"],)
 
     def get_expected_restypes_bond1(self) -> List[str]:
         return [atom["restype"] for atom in self.bond1["atom1"]["atomtypes"]]
@@ -1327,6 +1341,11 @@ def create_link_definitions() -> Dict[str, LinkDefinition]:
         link_defs[name] = LinkDefinition.from_dict(name, definition)
     return link_defs
 
-def get_link_definition(linkset_name: str) -> LinkDefinition:
+def get_link_definition(linkset_name: str) -> LinkDefinition | None:
     """Create and return a LinkDefinition instance for the specified linkset."""
-    return LinkDefinition.from_dict(linkset_name, CROSSLINKS[linkset_name])
+    if linkset_name in CROSSLINKS:
+        return LinkDefinition.from_dict(linkset_name, CROSSLINKS[linkset_name])
+    elif dynamic_corsslink.issupported(linkset_name):
+        return LinkDefinition.from_dynamic_name(linkset_name)
+    else:
+        return None

@@ -1464,11 +1464,13 @@ class Input:
           linkset_name = linkset["name"]
 
           #validate linkset_name
-          if linkset_name not in crosslink_definitions.CROSSLINKS:
+          if not (linkset_name in crosslink_definitions.CROSSLINKS or
+              crosslink_definitions.dynamic_corsslink.issupported(linkset_name)
+          ):
               raise ValueError(f"Crosslink {linkset_name} not found in crosslink_definitions.py")
           
           link_def = crosslink_definitions.get_link_definition(linkset_name)
-          
+
           # add userCCD to the user_ccd string
           user_ccd += link_def.user_ccd
 
