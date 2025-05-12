@@ -18,6 +18,7 @@ from alphafold3.cpp import cif_dict
 import numpy as np
 import rdkit.Chem as rd_chem
 from rdkit.Chem import AllChem as rd_all_chem
+from rdkit.Chem import Descriptors
 
 
 _RDKIT_MMCIF_TO_BOND_TYPE: Mapping[str, rd_chem.BondType] = {
@@ -253,6 +254,10 @@ def mol_to_ccd_cif(
   Only a subset of associated mmcif fields is populated, but that is
   sufficient for further usage, e.g. in featurization code.
 
+  Fields that are required for the custom CCD input are filled with the `?`,
+  _chem_comp.type assigned to 'non-polymer'.
+  All atoms are assigned as non-living.
+
   Atom names can be specified via `atom_name` property. For atoms with
   unspecified value of that property, the name is assigned based on element type
   and the order in the Mol object.
@@ -292,6 +297,14 @@ def mol_to_ccd_cif(
   mol_cif = collections.defaultdict(list)
   mol_cif['data_'] = [component_id]
   mol_cif['_chem_comp.id'] = [component_id]
+  # modification
+  mol_cif['_chem_comp.formula_weight'] = [f'{Descriptors.MolWt(mol):.2f}']
+  mol_cif['_chem_comp.name'] = ['?']
+  mol_cif['_chem_comp.formula'] = ['?']
+  mol_cif['_chem_comp.type'] = ['non-polymer']
+  mol_cif['_chem_comp.mon_nstd_parent_comp_id'] = ['?']
+  mol_cif['_chem_comp.pdbx_synonyms'] = ['?']
+
   if pdbx_smiles:
     mol_cif['_chem_comp.pdbx_smiles'] = [pdbx_smiles]
 
@@ -306,6 +319,9 @@ def mol_to_ccd_cif(
     mol_cif['_chem_comp_atom.atom_id'].append(atom.GetProp('atom_name'))
     mol_cif['_chem_comp_atom.type_symbol'].append(atom.GetSymbol().upper())
     mol_cif['_chem_comp_atom.charge'].append(str(atom.GetFormalCharge()))
+    # modification
+    mol_cif['_chem_comp_atom.pdbx_leaving_atom_flag'].append('N')
+
     if ideal_conformer is not None:
       coords = ideal_conformer[atom_idx]
       mol_cif['_chem_comp_atom.pdbx_model_Cartn_x_ideal'].append(coords[0])
