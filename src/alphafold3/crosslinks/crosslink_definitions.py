@@ -23,7 +23,7 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Self, Callable
-from alphafold3.crosslinks import dynamic_corsslink
+from alphafold3.crosslinks import dynamic_crosslink
 
 CROSSLINKS = {
 
@@ -1293,10 +1293,10 @@ class LinkDefinition:
     @classmethod
     def from_dynamic_name(cls, name: str) -> Self:
         """Creates a LinkDefinition object from the link name"""
-        link_type_name, _ = dynamic_corsslink.dynamic_xlinkname_processing(name)
-        if not link_type_name in dynamic_corsslink.REGISTERED_LINK_TYPES:
+        link_type_name, _ = dynamic_crosslink.dynamic_xlinkname_processing(name)
+        if not link_type_name in dynamic_crosslink.REGISTERED_LINK_TYPES:
             raise ValueError(f"Dynamic crosslink '{name}' is not supported.")
-        definition = dynamic_corsslink.REGISTERED_LINK_TYPES[link_type_name](name)[name] # TODO: correct syntax
+        definition = dynamic_crosslink.REGISTERED_LINK_TYPES[link_type_name](name)[name] # TODO: correct syntax
         return cls(name=name,
             ccd_code=definition["ccdCode"],
             user_ccd=definition["userCCD"],
@@ -1345,7 +1345,7 @@ def get_link_definition(linkset_name: str) -> LinkDefinition | None:
     """Create and return a LinkDefinition instance for the specified linkset."""
     if linkset_name in CROSSLINKS:
         return LinkDefinition.from_dict(linkset_name, CROSSLINKS[linkset_name])
-    elif dynamic_corsslink.issupported(linkset_name):
+    elif dynamic_crosslink.issupported(linkset_name):
         return LinkDefinition.from_dynamic_name(linkset_name)
     else:
         return None

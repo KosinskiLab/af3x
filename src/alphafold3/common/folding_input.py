@@ -1465,7 +1465,7 @@ class Input:
 
           #validate linkset_name
           if not (linkset_name in crosslink_definitions.CROSSLINKS or
-              crosslink_definitions.dynamic_corsslink.issupported(linkset_name)
+              crosslink_definitions.dynamic_crosslink.issupported(linkset_name)
           ):
               raise ValueError(f"Crosslink {linkset_name} not found in crosslink_definitions.py")
           
