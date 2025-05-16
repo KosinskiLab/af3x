@@ -90,8 +90,11 @@ Usage:
             }
         ]
     }
-
     ```
+
+> [!IMPORTANT] 
+> If you use asymmetrical crosslinks like SDA, the first residue in the pair should be the one that reacted with the NHS ester (e.g., K, S, T, or Y), and the second should be the one that reacted with the diazirine group.
+
     Supported crosslinkers:
     - DSSO
     - DSS
@@ -103,6 +106,9 @@ Usage:
     - PHOX
     - BSPEG5
     - BSPEG9
+    - SDA (same as Sulfo-SDA)
+    - LCSDA (same as Sulfo-LC-SDA)
+    - SDAD (same as Sulfo-SDAD)
 1. Run AlphaFold 3 as per the instructions in the original README below. Crosslinks will be added automatically.
 
     Key flags:

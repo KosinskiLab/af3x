@@ -1183,6 +1183,390 @@ _pdbx_chem_comp_descriptor.descriptor 'C1CC(=O)N(C1=O)OC(=O)CCCC(=O)ON2C(=O)CCC2
             }
         }
     },
+    "SDA": {
+        "ccdCode": "SDA",
+        "userCCD": "data_SDA\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          86.13\n_chem_comp.id                      SDA\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nC1  0 SDA N -1.937 -0.377 -0.304 C \nC2  0 SDA N -1.194 0.755  0.360  C \nC3  0 SDA N 0.273  0.747  -0.075 C \nC4  0 SDA N 0.964  -0.544 0.298  C \nC5  0 SDA N 2.389  -0.503 -0.144 C \nO1  0 SDA N 3.019  -0.663 -1.173 O \nH1  0 SDA N -1.534 -0.586 -1.318 H \nH2  0 SDA N -1.938 -1.293 0.303  H \nH3  0 SDA N -3.009 -0.034 -0.348 H \nH4  0 SDA N -1.267 0.635  1.444  H \nH5  0 SDA N -1.601 1.757  0.112  H \nH6  0 SDA N 0.809  1.602  0.380  H \nH7  0 SDA N 0.337  0.861  -1.174 H \nH8  0 SDA N 0.992  -0.655 1.399  H \nH9  0 SDA N 0.463  -1.421 -0.144 H \nH10 0 SDA N 3.234  -0.279 0.537  H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nC1 C2  SDA N N SING \nC2 C3  SDA N N SING \nC3 C4  SDA N N SING \nC4 C5  SDA N N SING \nC5 O1  SDA N N DOUB \nC1 H1  SDA N N SING \nC1 H2  SDA N N SING \nC1 H3  SDA N N SING \nC2 H4  SDA N N SING \nC2 H5  SDA N N SING \nC3 H6  SDA N N SING \nC3 H7  SDA N N SING \nC4 H8  SDA N N SING \nC4 H9  SDA N N SING \nC5 H10 SDA N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "SDA",
+                "atomname": "C5"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "ALA",
+                        "atomname": "CB"
+                    },
+                    {
+                        "restype": "ARG",
+                        "atomname": "NH2"
+                    },
+                    {
+                        "restype": "ASN",
+                        "atomname": "ND2"
+                    },
+                    {
+                        "restype": "ASP",
+                        "atomname": "OD2"
+                    },
+                    {
+                        "restype": "CYS",
+                        "atomname": "SG"
+                    },
+                    {
+                        "restype": "GLN",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "GLU",
+                        "atomname": "OE2"
+                    },
+                    {
+                        "restype": "GLY",
+                        "atomname": "CA"
+                    },
+                    {
+                        "restype": "HIS",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "ILE",
+                        "atomname": "CD1"
+                    },
+                    {
+                        "restype": "LEU",
+                        "atomname": "CD2"
+                    },
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "MET",
+                        "atomname": "CE"
+                    },
+                    {
+                        "restype": "PHE",
+                        "atomname": "CZ"
+                    },
+                    {
+                        "restype": "PRO",
+                        "atomname": "CD"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TRP",
+                        "atomname": "NE1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "VAL",
+                        "atomname": "CG2"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "SDA",
+                "atomname": "C2"
+            }
+        }
+    },
+    "LCSDA": {
+        "ccdCode": "LCSDA",
+        "userCCD": "data_LCSDA\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          199.29\n_chem_comp.id                      LCSDA\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nC1  0 LCSDA N 5.388  1.076  0.005  C \nC2  0 LCSDA N 4.184  0.129  -0.080 C \nC3  0 LCSDA N 3.322  0.290  1.125  C \nC4  0 LCSDA N 2.110  -0.576 1.177  C \nC5  0 LCSDA N 1.165  -0.354 0.056  C \nO1  0 LCSDA N 1.372  0.536  -0.802 O \nN1  0 LCSDA N 0.015  -1.175 -0.024 N \nC6  0 LCSDA N -1.001 -1.083 -1.052 C \nC7  0 LCSDA N -1.614 0.293  -0.968 C \nC8  0 LCSDA N -2.219 0.491  0.391  C \nC9  0 LCSDA N -3.276 -0.529 0.635  C \nC10 0 LCSDA N -4.407 -0.489 -0.359 C \nC11 0 LCSDA N -5.032 0.843  -0.296 C \nO2  0 LCSDA N -5.784 1.592  0.288  O \nH1  0 LCSDA N 5.757  1.324  -1.008 H \nH2  0 LCSDA N 5.057  1.994  0.516  H \nH3  0 LCSDA N 6.141  0.565  0.618  H \nH4  0 LCSDA N 3.668  0.399  -1.021 H \nH5  0 LCSDA N 4.610  -0.886 -0.176 H \nH6  0 LCSDA N 3.912  0.113  2.053  H \nH7  0 LCSDA N 2.968  1.351  1.174  H \nH8  0 LCSDA N 1.570  -0.328 2.135  H \nH9  0 LCSDA N 2.341  -1.658 1.262  H \nH10 0 LCSDA N -0.124 -1.915 0.715  H \nH11 0 LCSDA N -1.759 -1.881 -0.953 H \nH12 0 LCSDA N -0.560 -1.251 -2.071 H \nH13 0 LCSDA N -0.846 1.091  -1.094 H \nH14 0 LCSDA N -2.387 0.357  -1.774 H \nH15 0 LCSDA N -1.424 0.402  1.181  H \nH16 0 LCSDA N -2.593 1.538  0.508  H \nH17 0 LCSDA N -2.885 -1.557 0.659  H \nH18 0 LCSDA N -3.659 -0.359 1.680  H \nH19 0 LCSDA N -5.121 -1.294 -0.015 H \nH20 0 LCSDA N -4.060 -0.663 -1.380 H \nH21 0 LCSDA N -4.828 1.614  -1.035 H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nC1  C2  LCSDA N N SING \nC2  C3  LCSDA N N SING \nC3  C4  LCSDA N N SING \nC4  C5  LCSDA N N SING \nC5  O1  LCSDA N N DOUB \nC5  N1  LCSDA N N SING \nN1  C6  LCSDA N N SING \nC6  C7  LCSDA N N SING \nC7  C8  LCSDA N N SING \nC8  C9  LCSDA N N SING \nC9  C10 LCSDA N N SING \nC10 C11 LCSDA N N SING \nC11 O2  LCSDA N N DOUB \nC1  H1  LCSDA N N SING \nC1  H2  LCSDA N N SING \nC1  H3  LCSDA N N SING \nC2  H4  LCSDA N N SING \nC2  H5  LCSDA N N SING \nC3  H6  LCSDA N N SING \nC3  H7  LCSDA N N SING \nC4  H8  LCSDA N N SING \nC4  H9  LCSDA N N SING \nN1  H10 LCSDA N N SING \nC6  H11 LCSDA N N SING \nC6  H12 LCSDA N N SING \nC7  H13 LCSDA N N SING \nC7  H14 LCSDA N N SING \nC8  H15 LCSDA N N SING \nC8  H16 LCSDA N N SING \nC9  H17 LCSDA N N SING \nC9  H18 LCSDA N N SING \nC10 H19 LCSDA N N SING \nC10 H20 LCSDA N N SING \nC11 H21 LCSDA N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "LCSDA",
+                "atomname": "C11"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "ALA",
+                        "atomname": "CB"
+                    },
+                    {
+                        "restype": "ARG",
+                        "atomname": "NH2"
+                    },
+                    {
+                        "restype": "ASN",
+                        "atomname": "ND2"
+                    },
+                    {
+                        "restype": "ASP",
+                        "atomname": "OD2"
+                    },
+                    {
+                        "restype": "CYS",
+                        "atomname": "SG"
+                    },
+                    {
+                        "restype": "GLN",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "GLU",
+                        "atomname": "OE2"
+                    },
+                    {
+                        "restype": "GLY",
+                        "atomname": "CA"
+                    },
+                    {
+                        "restype": "HIS",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "ILE",
+                        "atomname": "CD1"
+                    },
+                    {
+                        "restype": "LEU",
+                        "atomname": "CD2"
+                    },
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "MET",
+                        "atomname": "CE"
+                    },
+                    {
+                        "restype": "PHE",
+                        "atomname": "CZ"
+                    },
+                    {
+                        "restype": "PRO",
+                        "atomname": "CD"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TRP",
+                        "atomname": "NE1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "VAL",
+                        "atomname": "CG2"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "LCSDA",
+                "atomname": "C2"
+            }
+        }
+    },
+    "SDAD": {
+        "ccdCode": "SDAD",
+        "userCCD": "data_SDAD\n#\n_chem_comp.formula                 ?\n_chem_comp.formula_weight          249.40\n_chem_comp.id                      SDAD\n_chem_comp.mon_nstd_parent_comp_id ?\n_chem_comp.name                    ?\n_chem_comp.pdbx_synonyms           ?\n_chem_comp.type                    non-polymer\n#\nloop_\n_chem_comp_atom.atom_id\n_chem_comp_atom.charge\n_chem_comp_atom.comp_id\n_chem_comp_atom.pdbx_leaving_atom_flag\n_chem_comp_atom.pdbx_model_Cartn_x_ideal\n_chem_comp_atom.pdbx_model_Cartn_y_ideal\n_chem_comp_atom.pdbx_model_Cartn_z_ideal\n_chem_comp_atom.type_symbol\nC1  0 SDAD N -3.657 2.109  0.100  C \nC2  0 SDAD N -3.559 0.932  1.027  C \nC3  0 SDAD N -3.755 -0.381 0.367  C \nC4  0 SDAD N -2.806 -0.737 -0.720 C \nC5  0 SDAD N -1.393 -0.814 -0.337 C \nO1  0 SDAD N -1.073 -0.592 0.858  O \nN1  0 SDAD N -0.440 -1.137 -1.340 N \nC6  0 SDAD N 1.000  -1.240 -1.062 C \nC7  0 SDAD N 1.292  -2.296 -0.052 C \nS1  0 SDAD N 3.013  -2.565 0.350  S \nS2  0 SDAD N 3.963  -0.994 1.315  S \nC8  0 SDAD N 4.812  0.172  0.288  C \nC9  0 SDAD N 3.980  1.037  -0.599 C \nC10 0 SDAD N 3.051  1.844  0.222  C \nO2  0 SDAD N 2.831  1.946  1.416  O \nH1  0 SDAD N -3.188 1.990  -0.875 H \nH2  0 SDAD N -3.174 2.975  0.633  H \nH3  0 SDAD N -4.707 2.436  -0.053 H \nH4  0 SDAD N -2.651 0.910  1.654  H \nH5  0 SDAD N -4.413 1.046  1.761  H \nH6  0 SDAD N -4.782 -0.520 -0.030 H \nH7  0 SDAD N -3.634 -1.164 1.167  H \nH8  0 SDAD N -2.912 -0.118 -1.634 H \nH9  0 SDAD N -3.101 -1.770 -1.060 H \nH10 0 SDAD N -0.802 -1.307 -2.327 H \nH11 0 SDAD N 1.492  -1.487 -2.015 H \nH12 0 SDAD N 1.377  -0.234 -0.741 H \nH13 0 SDAD N 0.850  -3.284 -0.373 H \nH14 0 SDAD N 0.783  -1.970 0.907  H \nH15 0 SDAD N 5.603  -0.383 -0.295 H \nH16 0 SDAD N 5.414  0.869  0.923  H \nH17 0 SDAD N 3.485  0.454  -1.396 H \nH18 0 SDAD N 4.685  1.769  -1.089 H \nH19 0 SDAD N 2.414  2.504  -0.387 H \n#\nloop_\n_chem_comp_bond.atom_id_1\n_chem_comp_bond.atom_id_2\n_chem_comp_bond.comp_id\n_chem_comp_bond.pdbx_aromatic_flag\n_chem_comp_bond.pdbx_stereo_config\n_chem_comp_bond.value_order\nC1  C2  SDAD N N SING \nC2  C3  SDAD N N SING \nC3  C4  SDAD N N SING \nC4  C5  SDAD N N SING \nC5  O1  SDAD N N DOUB \nC5  N1  SDAD N N SING \nN1  C6  SDAD N N SING \nC6  C7  SDAD N N SING \nC7  S1  SDAD N N SING \nS1  S2  SDAD N N SING \nS2  C8  SDAD N N SING \nC8  C9  SDAD N N SING \nC9  C10 SDAD N N SING \nC10 O2  SDAD N N DOUB \nC1  H1  SDAD N N SING \nC1  H2  SDAD N N SING \nC1  H3  SDAD N N SING \nC2  H4  SDAD N N SING \nC2  H5  SDAD N N SING \nC3  H6  SDAD N N SING \nC3  H7  SDAD N N SING \nC4  H8  SDAD N N SING \nC4  H9  SDAD N N SING \nN1  H10 SDAD N N SING \nC6  H11 SDAD N N SING \nC6  H12 SDAD N N SING \nC7  H13 SDAD N N SING \nC7  H14 SDAD N N SING \nC8  H15 SDAD N N SING \nC8  H16 SDAD N N SING \nC9  H17 SDAD N N SING \nC9  H18 SDAD N N SING \nC10 H19 SDAD N N SING \n#\n_pdbx_chem_comp_descriptor.descriptor ?\n_pdbx_chem_comp_descriptor.type       ?\n#\n",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "SDAD",
+                "atomname": "C10"
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "ALA",
+                        "atomname": "CB"
+                    },
+                    {
+                        "restype": "ARG",
+                        "atomname": "NH2"
+                    },
+                    {
+                        "restype": "ASN",
+                        "atomname": "ND2"
+                    },
+                    {
+                        "restype": "ASP",
+                        "atomname": "OD2"
+                    },
+                    {
+                        "restype": "CYS",
+                        "atomname": "SG"
+                    },
+                    {
+                        "restype": "GLN",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "GLU",
+                        "atomname": "OE2"
+                    },
+                    {
+                        "restype": "GLY",
+                        "atomname": "CA"
+                    },
+                    {
+                        "restype": "HIS",
+                        "atomname": "NE2"
+                    },
+                    {
+                        "restype": "ILE",
+                        "atomname": "CD1"
+                    },
+                    {
+                        "restype": "LEU",
+                        "atomname": "CD2"
+                    },
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "MET",
+                        "atomname": "CE"
+                    },
+                    {
+                        "restype": "PHE",
+                        "atomname": "CZ"
+                    },
+                    {
+                        "restype": "PRO",
+                        "atomname": "CD"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TRP",
+                        "atomname": "NE1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "VAL",
+                        "atomname": "CG2"
+                    }
+                ]
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "SDAD",
+                "atomname": "C2"
+            }
+        }
+    },
     "S-S": {
         "ccdCode": "S-S",
         "userCCD": """data_S-S
