@@ -92,8 +92,7 @@ Usage:
     }
     ```
 
-> [!IMPORTANT] 
-> If you use asymmetrical crosslinks like SDA, the first residue in the pair should be the one that reacted with the NHS ester (e.g., K, S, T, or Y), and the second should be the one that reacted with the diazirine group.
+    > If you use asymmetrical crosslinks like SDA, the first residue in the pair should be the one that reacted with the NHS ester (K, S, T, Y, N-terminal), and the second should be the one that reacted with the diazirine group.
 
     Supported crosslinkers:
     - DSSO
