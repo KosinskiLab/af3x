@@ -99,6 +99,7 @@ Usage:
     - DSSO
     - DSS
     - DSG
+    - CDI
     - BS3
     - BS2G
     - azide-A-DSBSO

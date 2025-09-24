@@ -549,6 +549,106 @@ _pdbx_chem_comp_descriptor.descriptor 'C1CC(=O)N(C1=O)OC(=O)CCCCCCC(=O)ON2C(=O)C
             }
         },
     },
+    "CDI": {
+        "ccdCode": "CDI",
+        "userCCD": """data_CDI
+#
+_chem_comp.formula                 ?
+_chem_comp.formula_weight          32.04
+_chem_comp.id                      CDI
+_chem_comp.mon_nstd_parent_comp_id ?
+_chem_comp.name                    ?
+_chem_comp.pdbx_smiles             CO
+_chem_comp.pdbx_synonyms           ?
+_chem_comp.type                    non-polymer
+#
+loop_
+_chem_comp_atom.atom_id
+_chem_comp_atom.charge
+_chem_comp_atom.comp_id
+_chem_comp_atom.pdbx_leaving_atom_flag
+_chem_comp_atom.pdbx_model_Cartn_x_ideal
+_chem_comp_atom.pdbx_model_Cartn_y_ideal
+_chem_comp_atom.pdbx_model_Cartn_z_ideal
+_chem_comp_atom.type_symbol
+C1 0 CDI N 0  0  0  C 
+O1 0 CDI N 0  0  0  O 
+#
+loop_
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.comp_id
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.pdbx_stereo_config
+_chem_comp_bond.value_order
+C1 O1 CDI N N DOUB 
+#
+""",
+        "bond1": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ],
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "CDI",
+                "atomname": "C1",
+            }
+        },
+        "bond2": {
+            "atom1": {
+                "moltype": "protein",
+                "atomtypes": [
+                    {
+                        "restype": "LYS",
+                        "atomname": "NZ"
+                    },
+                    {
+                        "restype": "SER",
+                        "atomname": "OG"
+                    },
+                    {
+                        "restype": "THR",
+                        "atomname": "OG1"
+                    },
+                    {
+                        "restype": "TYR",
+                        "atomname": "OH"
+                    },
+                    {
+                        "restype": "NTER",
+                        "atomname": "N"
+                    }
+                ],
+            },
+            "atom2": {
+                "moltype": "ligand",
+                "restype": "CDI",
+                "atomname": "C1",
+            }
+        },
+    },
     "BS3": {
         "ccdCode": "BS3",
         "userCCD": """data_BS3
