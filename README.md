@@ -136,6 +136,26 @@ Usage:
 ``` 
 Disulfide bonds will be added by mutating the cysteines to alanine and adding an S-S covalent ligand. Thanks Konstantin Gilep for the idea.
 
+## Dynamic crosslinks (experimental)
+
+Dynamic crosslinks have a variable length and can connect **any pair of residues** (the bond is formed to the last sidechain atom of each residue). The crosslinker type is specified as a name followed by a number that controls the length:
+
+- **`LINK<n>`** — a flexible poly-carbon chain of `n` carbon atoms (e.g. `LINK3` = 3-carbon linker R1-(CH<sub>2</sub>)<sub>3</sub>-R2, `LINK10` = 10-carbon linker).
+- **`RIGID<n>`** — a rigid structure made of `n` fused benzene rings (e.g. `RIGID1` = single benzene, `RIGID3` = triphenylene-like scaffold).
+
+Example JSON using a 5-carbon flexible linker between two arbitrary residues:
+
+```json
+"crosslinks": [
+    {
+        "name": "LINK5",
+        "residue_pairs": [
+            [["A", 10], ["B", 42]]
+        ]
+    }
+]
+```
+
 ## Zero-length crosslinks (coming soon)
 
 By this point you might know how it will be done.
