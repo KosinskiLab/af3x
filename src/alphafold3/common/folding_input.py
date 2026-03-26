@@ -1451,6 +1451,9 @@ class Input:
             if isinstance(chain, ProteinChain):
                 out_chains[idx] = self._apply_disulfide_mutations(chain)
 
+    if not all_links:
+        return dataclasses.replace(self, chains=out_chains)
+
     if all_links:
         used_chain_ids = [c.id for c in self.chains]
         ligands = []

@@ -467,5 +467,79 @@ class DisulfideDataPipelineTest8WW0(DataPipelineTest):
     self.assertEqual(len(fold_input.ligands), 0)
     # self.assertIsNotNone(fold_input.disulfide_bonds)
 
+class CrosslinkErrorHandlingTest(absltest.TestCase):
+  """Tests that expand_links raises clearly on invalid crosslink inputs."""
+
+  # Sequence with LYS residues (required by NHS-ester crosslinkers like DSSO).
+  # Position 5 = K (LYS), position 81 = K (LYS).
+  _LYS_SEQUENCE = (
+      'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADT'
+      'EAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
+  )
+  # All-Ala sequence (10 aa): contains no LYS, SER, or THR.
+  _ALA_SEQUENCE = 'AAAAAAAAAA'
+
+  def _make_json(self, seq_a, seq_b, crosslinks):
+    return json.dumps({
+        'name': 'test',
+        'modelSeeds': [1],
+        'sequences': [
+            {'protein': {'id': 'A', 'sequence': seq_a, 'modifications': [],
+                         'unpairedMsa': None, 'pairedMsa': None}},
+            {'protein': {'id': 'B', 'sequence': seq_b, 'modifications': [],
+                         'unpairedMsa': None, 'pairedMsa': None}},
+        ],
+        'crosslinks': crosslinks,
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    })
+
+  def test_invalid_crosslinker_name_raises(self):
+    """expand_links raises ValueError for an unrecognised crosslinker name."""
+    json_str = self._make_json(
+        self._LYS_SEQUENCE, self._LYS_SEQUENCE,
+        [{'name': 'NONEXISTENT_XL', 'residue_pairs': [(('A', 5), ('B', 5))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises(ValueError):
+      fold_input.expand_links()
+
+  def test_wrong_residue_type_raises(self):
+    """expand_links raises ValueError when the residue type is incompatible with the crosslinker.
+
+    DSSO targets LYS, SER, THR, TYR, or the N-terminus (NTER at position 1).
+    An all-Ala sequence at position 2 (not the N-terminus) has no valid attachment site.
+    """
+    json_str = self._make_json(
+        self._ALA_SEQUENCE, self._ALA_SEQUENCE,
+        [{'name': 'DSSO', 'residue_pairs': [(('A', 2), ('B', 2))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises(ValueError):
+      fold_input.expand_links()
+
+  def test_residue_out_of_range_raises(self):
+    """expand_links raises when a residue index exceeds the chain length."""
+    # _ALA_SEQUENCE is 10 residues; resid 11 is out of range.
+    json_str = self._make_json(
+        self._ALA_SEQUENCE, self._ALA_SEQUENCE,
+        [{'name': 'DSSO', 'residue_pairs': [(('A', 11), ('B', 1))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises((ValueError, IndexError)):
+      fold_input.expand_links()
+
+  def test_no_crosslinks_expand_links_is_noop(self):
+    """expand_links with no crosslinks returns the input unchanged (no new ligands or bonds)."""
+    json_str = self._make_json(self._LYS_SEQUENCE, self._LYS_SEQUENCE, [])
+    fold_input = folding_input.Input.from_json(json_str)
+    expanded = fold_input.expand_links()
+    # Bug was: UnboundLocalError because user_ccd/bonded_atom_pairs were only
+    # set inside the `if all_links:` block but referenced unconditionally in the return.
+    self.assertIsNone(expanded.bonded_atom_pairs)
+    self.assertEqual(len(expanded.ligands), 0)
+    self.assertEqual(len(expanded.protein_chains), 2)
+
+
 if __name__ == '__main__':
   absltest.main()
