@@ -35,6 +35,8 @@ import numpy as np
 import run_alphafold
 import shutil
 
+from alphafold3 import structure
+
 
 _JACKHMMER_BINARY_PATH = shutil.which('jackhmmer')
 _NHMMER_BINARY_PATH = shutil.which('nhmmer')
@@ -381,21 +383,18 @@ class InferenceTest(test_utils.StructureTestCase):
       self.fail(f'Masked RMSD too high: {actual_masked_rmsds=}')
 
 class CrosslinkInferenceTest(InferenceTest):
-  """Test AlphaFold 3 inference."""
+  """Test AlphaFold 3 inference with crosslinks."""
 
   def setUp(self):
     super().setUp()
-#   def __init__(self, methodName='runTest', test_input=None):
-#     super().__init__(methodName)
-    
     test_input = {
-        'name': '5tgy',
+        'name': '1U0I',
         'modelSeeds': [1234],
         'sequences': [
             {
                 'protein': {
                     'id': 'A',
-                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'sequence': 'EIAALEKEIAALEKEIAALEK',
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -404,7 +403,7 @@ class CrosslinkInferenceTest(InferenceTest):
             {
                 'protein': {
                     'id': 'B',
-                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'sequence': 'KIAALKEKIAALKEKIAALKE',
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -413,10 +412,10 @@ class CrosslinkInferenceTest(InferenceTest):
         ],
         'crosslinks': [
             {
-                'name': 'AzideDSBSO',
+                'name': 'azide-A-DSBSO',
                 'residue_pairs': [
-                  (("A", 5), ("B", 5)),
-                  (("A", 81), ("B", 81)),
+                  (("A", 7), ("B", 6)),
+                  (("A", 14), ("B", 13)),
                 ]
             }
         ],
@@ -424,6 +423,188 @@ class CrosslinkInferenceTest(InferenceTest):
         'version': folding_input.JSON_VERSION,
     }
     self._test_input_json = json.dumps(test_input)
+
+  def test_model_inference(self):
+    self.skipTest(
+        'Uses non-crosslink featurised_example.pkl; not applicable to crosslinks.'
+    )
+
+  @parameterized.named_parameters(
+      {'testcase_name': 'default_bucket', 'bucket': None, 'seed': 1},
+      {'testcase_name': 'bucket_1024', 'bucket': 1024, 'seed': 42},
+  )
+  def test_inference(self, bucket, seed):
+    """Run AlphaFold 3 inference with crosslinks."""
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = dataclasses.replace(fold_input, rng_seeds=[seed])
+    fold_input = fold_input.expand_links()  # Add crosslinker ligands (chains C, D)
+
+    output_dir = self.create_tempdir().full_path
+    actual = run_alphafold.process_fold_input(
+        fold_input,
+        self._data_pipeline_config,
+        run_alphafold.ModelRunner(
+            config=self._model_config,
+            device=jax.local_devices(backend='gpu')[0],
+            model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
+        ),
+        output_dir=output_dir,
+        buckets=None if bucket is None else [bucket],
+        return_all_inference_results=True,
+    )
+
+    # --- Output directory structure ---
+    expected_model_cif_filename = f'{fold_input.sanitised_name()}_model.cif'
+    expected_summary_confidences_filename = (
+        f'{fold_input.sanitised_name()}_summary_confidences.json'
+    )
+    expected_confidences_filename = (
+        f'{fold_input.sanitised_name()}_confidences.json'
+    )
+    expected_data_json_filename = f'{fold_input.sanitised_name()}_data.json'
+    prefix = f'seed-{seed}'
+    self.assertSameElements(
+        os.listdir(output_dir),
+        [
+            f'{prefix}_sample-0', f'{prefix}_sample-1', f'{prefix}_sample-2',
+            f'{prefix}_sample-3', f'{prefix}_sample-4',
+            f'{prefix}_embeddings',
+            expected_confidences_filename,
+            expected_model_cif_filename,
+            expected_summary_confidences_filename,
+            'ranking_scores.csv',
+            expected_data_json_filename,
+            'TERMS_OF_USE.md',
+        ],
+    )
+
+    # --- Embeddings: check shape consistency (no hardcoded +41 for 7BU) ---
+    embeddings_dir = os.path.join(output_dir, f'{prefix}_embeddings')
+    embeddings = np.load(os.path.join(embeddings_dir, 'embeddings.npz'))
+    self.assertSameElements(
+        embeddings.keys(), ['single_embeddings', 'pair_embeddings']
+    )
+    n_tokens = embeddings['single_embeddings'].shape[0]
+    self.assertGreater(n_tokens, 0)
+    self.assertEqual(embeddings['single_embeddings'].shape, (n_tokens, 384))
+    self.assertEqual(
+        embeddings['pair_embeddings'].shape, (n_tokens, n_tokens, 128)
+    )
+
+    # --- Data JSON: check protein chains and crosslinks field ---
+    with open(os.path.join(output_dir, expected_data_json_filename), 'rt') as f:
+      actual_input_json = json.load(f)
+    self.assertEqual(
+        actual_input_json['sequences'][0]['protein']['sequence'],
+        fold_input.protein_chains[0].sequence,
+    )
+    self.assertEqual(
+        actual_input_json['sequences'][1]['protein']['sequence'],
+        fold_input.protein_chains[1].sequence,
+    )
+    self.assertNotEmpty(
+        actual_input_json['sequences'][0]['protein']['unpairedMsa']
+    )
+    self.assertNotEmpty(
+        actual_input_json['sequences'][0]['protein']['pairedMsa']
+    )
+    self.assertIsNotNone(
+        actual_input_json['sequences'][0]['protein']['templates']
+    )
+
+    # --- Ranking scores: valid range [0.0, 1.5] ---
+    with open(os.path.join(output_dir, 'ranking_scores.csv'), 'rt') as f:
+      ranking_scores = list(csv.DictReader(f))
+    self.assertLen(ranking_scores, 5)
+    ranking_scores_values = [float(s['ranking_score']) for s in ranking_scores]
+    if not all(0.0 <= s <= 1.5 for s in ranking_scores_values):
+      self.fail(f'{ranking_scores_values=} are not valid ranking scores')
+
+    # --- Crosslink output: crosslinker ligand chains must appear in output CIF ---
+    output_cif_content = pathlib.Path(
+        os.path.join(output_dir, expected_model_cif_filename)
+    ).read_text()
+    output_structure = structure.from_mmcif(output_cif_content)
+    output_chain_ids = set(output_structure.chain_id)
+    self.assertIn('A', output_chain_ids)
+    self.assertIn('B', output_chain_ids)
+    self.assertNotEmpty(
+        output_chain_ids - {'A', 'B'},
+        msg='Crosslinker ligand chains must appear in output CIF.',
+    )
+
+    # --- Token chain IDs: protein chains A and B should be first ---
+    seq_len = len(fold_input.protein_chains[0].sequence)
+    for actual_inf in actual:
+      for inference_result in actual_inf.inference_results:
+        token_chain_ids = inference_result.metadata['token_chain_ids']
+        self.assertEqual(token_chain_ids[:seq_len], ['A'] * seq_len)
+        self.assertEqual(token_chain_ids[seq_len:2 * seq_len], ['B'] * seq_len)
+
+class CrosslinkInference9G5KTest(test_utils.StructureTestCase):
+  """Inference regression test for a real crosslinked structure (9G5K)."""
+
+  def setUp(self):
+    super().setUp()
+    self._model_config = run_alphafold.make_model_config(
+        return_embeddings=False, flash_attention_implementation='triton'
+    )
+    self._runner = run_alphafold.ModelRunner(
+        config=self._model_config,
+        device=jax.local_devices()[0],
+        model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
+    )
+
+  def test_inference_9g5k(self):
+    """Run inference on 9G5K (pre-computed MSAs, no data pipeline)."""
+    input_path = testing_data.Data(
+        resources.ROOT / 'test_data/crosslinks/9G5K/9G5K_input.json'
+    ).path()
+    fold_input = folding_input.Input.from_json(
+        pathlib.Path(input_path).read_text()
+    )
+    fold_input = fold_input.expand_links()  # Adds chain C (azide-A-DSBSO ligand)
+
+    output_dir = self.create_tempdir().full_path
+    actual = run_alphafold.process_fold_input(
+        fold_input,
+        data_pipeline_config=None,  # Skip data pipeline — MSAs already in JSON
+        model_runner=run_alphafold.ModelRunner(
+            config=self._model_config,
+            device=jax.local_devices(backend='gpu')[0],
+            model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
+        ),
+        output_dir=output_dir,
+        return_all_inference_results=True,
+    )
+
+    # Output CIF must exist.
+    expected_cif_filename = f'{fold_input.sanitised_name()}_model.cif'
+    output_cif_path = os.path.join(output_dir, expected_cif_filename)
+    self.assertTrue(os.path.exists(output_cif_path))
+
+    # Crosslinker chain C must appear in the output CIF.
+    output_cif_content = pathlib.Path(output_cif_path).read_text()
+    output_structure = structure.from_mmcif(output_cif_content)
+    output_chain_ids = set(output_structure.chain_id)
+    self.assertIn('A', output_chain_ids)
+    self.assertIn('B', output_chain_ids)
+    self.assertNotEmpty(
+        output_chain_ids - {'A', 'B'},
+        msg='Crosslinker ligand chain must appear in 9G5K output CIF.',
+    )
+
+    # pLDDT check: at least 50% of atoms should have b_factor > 50.
+    for actual_inf in actual:
+      for inference_result in actual_inf.inference_results:
+        b_factors = inference_result.predicted_structure.atom_b_factor
+        high_conf_proportion = np.sum(b_factors > 50.0) / len(b_factors)
+        if high_conf_proportion < 0.5:
+          self.fail(
+              f'Low confidence for 9G5K: only {high_conf_proportion:.1%}'
+              ' of atoms have pLDDT > 50.'
+          )
+
 
 if __name__ == '__main__':
   absltest.main()
