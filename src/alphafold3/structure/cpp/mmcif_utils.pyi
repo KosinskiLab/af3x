@@ -23,7 +23,7 @@ def filter(
     include_water: bool = ...,
     include_other: bool = ...,
     model_id: str = ...,
-) -> tuple[np.ndarray[int], mmcif_layout.MmcifLayout]: ...
+) -> tuple[np.ndarray[int], set[str], mmcif_layout.MmcifLayout]: ...
 
 
 def fix_residues(

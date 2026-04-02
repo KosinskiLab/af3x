@@ -41,11 +41,13 @@ class Hmmbuild(object):
     Raises:
       RuntimeError: If hmmbuild binary not found within the path.
     """
-    self.binary_path = binary_path
-    self.singlemx = singlemx
-    self.alphabet = alphabet
+    self._binary_path = binary_path
+    self._singlemx = singlemx
+    self._alphabet = alphabet
 
-    subprocess_utils.check_binary_exists(path=self.binary_path, name='hmmbuild')
+    subprocess_utils.check_binary_exists(
+        path=self._binary_path, name='hmmbuild'
+    )
 
   def build_profile_from_sto(self, sto: str, model_construction='fast') -> str:
     """Builds a HHM for the aligned sequences given as an A3M string.
@@ -121,14 +123,14 @@ class Hmmbuild(object):
       # If adding flags, we have to do so before the output and input:
       if model_construction == 'hand':
         cmd_flags.append(f'--{model_construction}')
-      if self.singlemx:
+      if self._singlemx:
         cmd_flags.append('--singlemx')
-      if self.alphabet:
-        cmd_flags.append(f'--{self.alphabet}')
+      if self._alphabet:
+        cmd_flags.append(f'--{self._alphabet}')
 
       cmd_flags.extend([output_hmm_path, input_msa_path])
 
-      cmd = [self.binary_path, *cmd_flags]
+      cmd = [self._binary_path, *cmd_flags]
 
       subprocess_utils.run(
           cmd=cmd,

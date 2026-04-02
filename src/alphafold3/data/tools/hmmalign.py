@@ -37,9 +37,11 @@ class Hmmalign:
     Raises:
       RuntimeError: If hmmalign binary not found within the path.
     """
-    self.binary_path = binary_path
+    self._binary_path = binary_path
 
-    subprocess_utils.check_binary_exists(path=self.binary_path, name='hmmalign')
+    subprocess_utils.check_binary_exists(
+        path=self._binary_path, name='hmmalign'
+    )
 
   def align_sequences(
       self,
@@ -86,7 +88,7 @@ class Hmmalign:
         f.write(a3m_str)
 
       cmd = [
-          self.binary_path,
+          self._binary_path,
           *('-o', output_a3m_path),
           *('--outformat', 'A2M'),  # A2M is A3M in the HMMER suite.
       ]

@@ -17,6 +17,7 @@ import re
 import sys
 
 from alphafold3.common import resources
+from alphafold3.common import safe_pickle
 import tqdm
 
 
@@ -65,7 +66,7 @@ def main(argv: Sequence[str]) -> None:
 
   print(f'Loading {_CCD_PICKLE_FILE}', flush=True)
   with open(_CCD_PICKLE_FILE, 'rb') as f:
-    ccd: Mapping[str, Mapping[str, Sequence[str]]] = pickle.load(f)
+    ccd: Mapping[str, Mapping[str, Sequence[str]]] = safe_pickle.load(f)
   output_path = pathlib.Path(argv[1])
   output_path.parent.mkdir(exist_ok=True)
   print('Finding ions and glycans', flush=True)

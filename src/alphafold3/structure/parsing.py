@@ -93,12 +93,10 @@ def _create_bond_lookup(
 def _get_atom_element(
     ccd: chemical_components.Ccd, res_name: str, atom_name: str
 ) -> str:
-  return (
-      chemical_components.type_symbol(
-          ccd=ccd, res_name=res_name, atom_name=atom_name
-      )
-      or '?'
+  type_symbol = chemical_components.type_symbol(
+      ccd, res_name=res_name, atom_name=atom_name
   )
+  return type_symbol or '?'
 
 
 def _get_representative_atom(
@@ -628,11 +626,13 @@ def expand_sequence(
 
 
 def from_sequences_and_bonds(
+    *,
     sequences: Sequence[str],
     chain_types: Sequence[str],
     sequence_formats: Sequence[SequenceFormat],
     bonded_atom_pairs: Sequence[tuple[BondAtomId, BondAtomId]] | None,
     ccd: chemical_components.Ccd,
+    chain_ids: Sequence[str] | None = None,
     name: str = 'from_sequences_and_bonds',
     bond_type: str | None = None,
     **constructor_args,
@@ -658,6 +658,9 @@ def from_sequences_and_bonds(
       CA. If the atom is not found in the standard atoms for that residue
       (according to the CCD) then an error is raised.
     ccd: The chemical components dictionary.
+    chain_ids: A sequence of chain IDs, one for each chain in `sequences`. If
+      not provided, then the chain IDs will be generated automatically based on
+      sequence indices.
     name: A name for the returned structure.
     bond_type: This type will be used for all bonds in the structure, where type
       follows PDB scheme, e.g. unknown (?), hydrog, metalc, covale, disulf.
@@ -687,7 +690,10 @@ def from_sequences_and_bonds(
   for chain_i, (sequence, curr_chain_type, sequence_format) in enumerate(
       zip(sequences, chain_types, sequence_formats, strict=True)
   ):
-    current_chain_id = mmcif.int_id_to_str_id(chain_i + 1)
+    if chain_ids is not None:
+      current_chain_id = chain_ids[chain_i]
+    else:
+      current_chain_id = mmcif.int_id_to_str_id(chain_i + 1)
     num_chain_residues = 0
     for res_i, full_res_name in enumerate(
         expand_sequence(sequence, curr_chain_type, sequence_format)
@@ -698,7 +704,20 @@ def from_sequences_and_bonds(
       # Look for bonded atoms in the bond lookup and if any are found, add
       # their atom keys to the bond atom_key columns.
       if bond_indices_by_atom_name := bond_lookup.get((chain_i, res_i)):
+        comp_atoms = None
+        if sequence_format != SequenceFormat.LIGAND_SMILES:
+          comp_atoms = set(ccd.get(full_res_name)['_chem_comp_atom.atom_id'])
         for bond_atom_name, bond_indices in bond_indices_by_atom_name.items():
+          if comp_atoms is not None and bond_atom_name not in comp_atoms:
+            raise ValueError(
+                f'Bonded atom "{bond_atom_name}" was not found in the list of'
+                f' atoms of the chemical component {full_res_name}. Valid atom'
+                f' names for {full_res_name} are: {sorted(comp_atoms)}.'
+                ' This is likely caused by an invalid atom name in the bonded'
+                f' atom (chain_id={current_chain_id}, res_id={current_res_id},'
+                f' atom_name={bond_atom_name}) specified in `bondedAtomPairs`'
+                ' in the input JSON.'
+            )
           atom_name.append(bond_atom_name)
           atom_element.append(
               _get_atom_element(
@@ -1112,12 +1131,12 @@ def _maybe_add_missing_scheme_tables(
         zip(cif['_entity.id'], cif['_entity.type'], strict=True)
     )
     # Remap asym ID -> entity ID.
-    chain_type = string_array.remap(
+    label_entity_id = string_array.remap(
         label_asym_ids, mapping=entity_id_by_chain_id, inplace=False
     )
     # Remap entity ID -> chain type.
-    string_array.remap(
-        chain_type, mapping=chain_type_by_entity_id, inplace=True
+    chain_type = string_array.remap(
+        label_entity_id, mapping=chain_type_by_entity_id, inplace=False
     )
     res_mask = np.zeros_like(label_seq_ids, dtype=bool)
     res_mask[res_starts] = True
@@ -1135,11 +1154,19 @@ def _maybe_add_missing_scheme_tables(
       poly_seq_entity_id = cif.get_array(
           '_entity_poly_seq.entity_id', dtype=object
       )
+      # We have to add the entity ID to the residue ID because multiple residues
+      # can share the same ID. This also allows using string_array.remap.
       label_seq_id_to_auth_seq_id = dict(
-          zip(label_seq_ids[res_mask], auth_seq_ids[res_mask], strict=True)
+          zip(
+              np.char.add(label_entity_id[res_mask], label_seq_ids[res_mask]),
+              auth_seq_ids[res_mask],
+              strict=True,
+          )
       )
       scheme_pdb_seq_num = string_array.remap(
-          poly_seq_num, mapping=label_seq_id_to_auth_seq_id, default_value='.'
+          np.char.add(poly_seq_entity_id, poly_seq_num),
+          mapping=label_seq_id_to_auth_seq_id,
+          default_value='.',
       )
       label_seq_id_to_ins_code = dict(
           zip(label_seq_ids[res_mask], pdb_ins_codes[res_mask], strict=True)
@@ -1182,11 +1209,11 @@ def _maybe_add_missing_scheme_tables(
           inplace=False,
       )
       update['_pdbx_poly_seq_scheme.asym_id'] = res_asym_ids
+      update['_pdbx_poly_seq_scheme.pdb_strand_id'] = res_strand_ids
       update['_pdbx_poly_seq_scheme.pdb_seq_num'] = auth_seq_ids[res_mask]
       update['_pdbx_poly_seq_scheme.pdb_ins_code'] = pdb_ins_codes[res_mask]
       update['_pdbx_poly_seq_scheme.seq_id'] = label_seq_ids[res_mask]
       update['_pdbx_poly_seq_scheme.mon_id'] = label_comp_ids[res_mask]
-      update['_pdbx_poly_seq_scheme.pdb_strand_id'] = res_strand_ids
 
   required_nonpoly_scheme_cols = (
       '_pdbx_nonpoly_scheme.mon_id',
@@ -1301,9 +1328,10 @@ def get_tables(
   if cif_update := _generate_required_tables_if_missing(cif):
     cif = cif.copy_and_update(cif_update)
 
-  # Resolve alt-locs, selecting only a single option for each residue. Also
-  # computes the layout, which defines where chain and residue boundaries are.
-  atom_site_all_models, layout = mmcif_utils.filter(
+  # The wanted_chain_ids include chain IDs that are not necessarily present in
+  # the _atom_site table, because we want to be able to read Structures with
+  # chains consist of only unresolved residues.
+  atom_site_all_models, wanted_chain_ids, layout = mmcif_utils.filter(
       cif,
       include_nucleotides=True,
       include_ligands=True,
@@ -1429,12 +1457,7 @@ def get_tables(
   if not include_other and poly_seq_mask:
     # Mask filtered-out residues so that they are not treated as missing.
     # Instead, we don't want them included in the chains/residues tables at all.
-    keep_mask = string_array.remap(
-        poly_seq_asym_ids,
-        mapping={cid: True for cid in resolved_chain_ids},
-        default_value=False,
-        inplace=False,
-    ).astype(bool)
+    keep_mask = string_array.isin(poly_seq_asym_ids, wanted_chain_ids)
     poly_seq_mask &= keep_mask
 
   chain_res_builder.add_residues(
@@ -1585,10 +1608,11 @@ def get_tables(
   except KeyError as e:
     raise ValueError(
         'Lookup for the following atom from the _atom_site table failed: '
-        f'(atom_id, auth_seq_id, res_name, ins_code)={e}. This is '
-        'likely due to a known issue with some multi-model mmCIFs that only '
-        'match the first model in _atom_site table to the _pdbx_poly_scheme, '
-        '_pdbx_nonpoly_scheme, or _pdbx_branch_scheme tables.'
+        f'(label_asym_id, auth_seq_id, res_name, ins_code)={e}. This typically '
+        'indicates that the _pdbx_poly_seq_scheme, _pdbx_nonpoly_scheme, or '
+        '_pdbx_branch_scheme tables do not have data for all residues present '
+        'in the _atom_site table. It could also be due to a known issue with '
+        'a small number of multi-model mmCIFs.'
     ) from e
 
   # The residue ID will be shared for all atoms within that residue.

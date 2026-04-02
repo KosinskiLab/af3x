@@ -21,7 +21,6 @@ from alphafold3.model.network import atom_cross_attention
 from alphafold3.model.network import diffusion_transformer
 from alphafold3.model.network import featurization
 from alphafold3.model.network import noise_level_embeddings
-import chex
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -143,7 +142,9 @@ class DiffusionHead(hk.Module):
     pair_embedding = use_conditioning * embeddings['pair']
 
     rel_features = featurization.create_relative_encoding(
-        batch.token_features, max_relative_idx=32, max_relative_chain=2
+        seq_features=batch.token_features,
+        max_relative_idx=32,
+        max_relative_chain=2,
     ).astype(pair_embedding.dtype)
     features_2d = jnp.concatenate([pair_embedding, rel_features], axis=-1)
     pair_cond = hm.Linear(
@@ -237,7 +238,6 @@ class DiffusionHead(hk.Module):
       act = enc.token_act
 
       # Token-token attention
-      chex.assert_shape(act, (None, self.config.per_token_channels))
       act = jnp.asarray(act, dtype=jnp.float32)
 
       act += hm.Linear(

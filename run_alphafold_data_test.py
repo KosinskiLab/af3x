@@ -31,7 +31,6 @@ from alphafold3.constants import chemical_components
 from alphafold3.data import featurisation
 from alphafold3.data import pipeline
 from alphafold3.model.atom_layout import atom_layout
-from alphafold3.structure import test_utils
 import jax
 import numpy as np
 
@@ -98,7 +97,7 @@ def _generate_diff(actual: str, expected: str) -> str:
   )
 
 
-class DataPipelineTest(test_utils.StructureTestCase):
+class DataPipelineTest(parameterized.TestCase):
   """Test AlphaFold 3 inference."""
 
   def setUp(self):
@@ -163,7 +162,9 @@ class DataPipelineTest(test_utils.StructureTestCase):
             {
                 'protein': {
                     'id': 'P',
-                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'sequence': (
+                        'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
+                    ),
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -206,7 +207,7 @@ class DataPipelineTest(test_utils.StructureTestCase):
     full_fold_input = data_pipeline.process(fold_input)
     featurised_example = featurisation.featurise_input(
         full_fold_input,
-        ccd=chemical_components.cached_ccd(),
+        ccd=chemical_components.Ccd(),
         buckets=None,
     )
     del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.

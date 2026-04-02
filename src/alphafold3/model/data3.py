@@ -10,7 +10,7 @@
 
 """Protein features that are computed from parsed mmCIF objects."""
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 import datetime
 from typing import TypeAlias
 
@@ -21,13 +21,6 @@ import numpy as np
 
 
 FeatureDict: TypeAlias = Mapping[str, np.ndarray]
-MutableFeatureDict: TypeAlias = MutableMapping[str, np.ndarray]
-
-
-def fix_features(msa_features: MutableFeatureDict) -> MutableFeatureDict:
-  """Renames the deletion_matrix feature."""
-  msa_features['deletion_matrix'] = msa_features.pop('deletion_matrix_int')
-  return msa_features
 
 
 def get_profile_features(

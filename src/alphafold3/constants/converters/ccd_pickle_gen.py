@@ -34,7 +34,7 @@ def main(argv: Sequence[str]) -> None:
   with opener(input_file, 'rb') as f:
     whole_file = f.read()
   result = {
-      key: {k: tuple(v) for k, v in value.items()}
+      key: value.to_dict()
       for key, value in tqdm.tqdm(
           cif_dict.parse_multi_data_cif(whole_file).items(), disable=None
       )

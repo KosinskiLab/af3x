@@ -214,21 +214,42 @@ class DataPipelineConfig:
       raw MSA in template search.
     small_bfd_database_path: Small BFD database path, used for protein MSA
       search.
+    small_bfd_z_value: The Z-value representing the database size in number of
+      sequences for E-value calculation. Must be set for sharded databases.
     mgnify_database_path: Mgnify database path, used for protein MSA search.
+    mgnify_z_value: The Z-value representing the database size in number of
+      sequences for E-value calculation. Must be set for sharded databases.
     uniprot_cluster_annot_database_path: Uniprot database path, used for protein
       paired MSA search.
+    uniprot_cluster_annot_z_value: The Z-value representing the database size in
+      number of sequences for E-value calculation. Must be set for sharded
+      databases.
     uniref90_database_path: UniRef90 database path, used for MSA search, and the
       MSA obtained by searching it is used to construct the profile for template
       search.
+    uniref90_z_value: The Z-value representing the database size in number of
+      sequences for E-value calculation. Must be set for sharded databases.
     ntrna_database_path: NT-RNA database path, used for RNA MSA search.
+    ntrna_z_value: The Z-value representing the database size in megabases for
+      E-value calculation. Must be set for sharded databases.
     rfam_database_path: Rfam database path, used for RNA MSA search.
+    rfam_z_value: The Z-value representing the database size in megabases for
+      E-value calculation. Must be set for sharded databases.
     rna_central_database_path: RNAcentral database path, used for RNA MSA
       search.
+    rna_central_z_value: The Z-value representing the database size in megabases
+      for E-value calculation. Must be set for sharded databases.
     seqres_database_path: PDB sequence database path, used for template search.
     pdb_database_path: PDB database directory with mmCIF files path, used for
       template search.
     jackhmmer_n_cpu: Number of CPUs to use for Jackhmmer.
+    jackhmmer_max_parallel_shards: Maximum number of shards to search against in
+      parallel. If None, one Jackhmmer instance will be run per shard. Only
+      applicable if the database is sharded.
     nhmmer_n_cpu: Number of CPUs to use for Nhmmer.
+    nhmmer_max_parallel_shards: Maximum number of shards to search against in
+      parallel. If None, one Nhmmer instance will be run per shard. Only
+      applicable if the database is sharded.
     max_template_date: The latest date of templates to use.
   """
 
@@ -241,20 +262,29 @@ class DataPipelineConfig:
 
   # Jackhmmer databases.
   small_bfd_database_path: str
+  small_bfd_z_value: int | None = None
   mgnify_database_path: str
+  mgnify_z_value: int | None = None
   uniprot_cluster_annot_database_path: str
+  uniprot_cluster_annot_z_value: int | None = None
   uniref90_database_path: str
+  uniref90_z_value: int | None = None
   # Nhmmer databases.
   ntrna_database_path: str
+  ntrna_z_value: int | None = None
   rfam_database_path: str
+  rfam_z_value: int | None = None
   rna_central_database_path: str
+  rna_central_z_value: int | None = None
   # Template search databases.
   seqres_database_path: str
   pdb_database_path: str
 
   # Optional configuration for MSA tools.
   jackhmmer_n_cpu: int = 8
+  jackhmmer_max_parallel_shards: int | None = None
   nhmmer_n_cpu: int = 8
+  nhmmer_max_parallel_shards: int | None = None
 
   max_template_date: datetime.date
 
@@ -274,8 +304,10 @@ class DataPipeline:
             n_cpu=data_pipeline_config.jackhmmer_n_cpu,
             n_iter=1,
             e_value=1e-4,
-            z_value=None,
+            z_value=data_pipeline_config.uniref90_z_value,
+            dom_z_value=data_pipeline_config.uniref90_z_value,
             max_sequences=10_000,
+            max_parallel_shards=data_pipeline_config.jackhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.PROTEIN_CHAIN,
         crop_size=None,
@@ -290,8 +322,10 @@ class DataPipeline:
             n_cpu=data_pipeline_config.jackhmmer_n_cpu,
             n_iter=1,
             e_value=1e-4,
-            z_value=None,
+            z_value=data_pipeline_config.mgnify_z_value,
+            dom_z_value=data_pipeline_config.mgnify_z_value,
             max_sequences=5_000,
+            max_parallel_shards=data_pipeline_config.jackhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.PROTEIN_CHAIN,
         crop_size=None,
@@ -308,8 +342,10 @@ class DataPipeline:
             e_value=1e-4,
             # Set z_value=138_515_945 to match the z_value used in the paper.
             # In practice, this has minimal impact on predicted structures.
-            z_value=None,
+            z_value=data_pipeline_config.small_bfd_z_value,
+            dom_z_value=data_pipeline_config.small_bfd_z_value,
             max_sequences=5_000,
+            max_parallel_shards=data_pipeline_config.jackhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.PROTEIN_CHAIN,
         crop_size=None,
@@ -324,8 +360,10 @@ class DataPipeline:
             n_cpu=data_pipeline_config.jackhmmer_n_cpu,
             n_iter=1,
             e_value=1e-4,
-            z_value=None,
+            z_value=data_pipeline_config.uniprot_cluster_annot_z_value,
+            dom_z_value=data_pipeline_config.uniprot_cluster_annot_z_value,
             max_sequences=50_000,
+            max_parallel_shards=data_pipeline_config.jackhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.PROTEIN_CHAIN,
         crop_size=None,
@@ -342,7 +380,9 @@ class DataPipeline:
             n_cpu=data_pipeline_config.nhmmer_n_cpu,
             e_value=1e-3,
             alphabet='rna',
+            z_value=data_pipeline_config.ntrna_z_value,
             max_sequences=10_000,
+            max_parallel_shards=data_pipeline_config.nhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.RNA_CHAIN,
         crop_size=None,
@@ -359,7 +399,9 @@ class DataPipeline:
             n_cpu=data_pipeline_config.nhmmer_n_cpu,
             e_value=1e-3,
             alphabet='rna',
+            z_value=data_pipeline_config.rfam_z_value,
             max_sequences=10_000,
+            max_parallel_shards=data_pipeline_config.nhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.RNA_CHAIN,
         crop_size=None,
@@ -376,7 +418,9 @@ class DataPipeline:
             n_cpu=data_pipeline_config.nhmmer_n_cpu,
             e_value=1e-3,
             alphabet='rna',
+            z_value=data_pipeline_config.rna_central_z_value,
             max_sequences=10_000,
+            max_parallel_shards=data_pipeline_config.nhmmer_max_parallel_shards,
         ),
         chain_poly_type=mmcif_names.RNA_CHAIN,
         crop_size=None,

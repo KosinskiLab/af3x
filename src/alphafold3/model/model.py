@@ -39,10 +39,9 @@ import numpy as np
 
 
 ModelResult: TypeAlias = Mapping[str, Any]
-_ScalarNumberOrArray: TypeAlias = Mapping[str, float | int | np.ndarray]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class InferenceResult:
   """Postprocessed model result.
 
@@ -58,8 +57,12 @@ class InferenceResult:
   """
 
   predicted_structure: structure.Structure = dataclasses.field()
-  numerical_data: _ScalarNumberOrArray = dataclasses.field(default_factory=dict)
-  metadata: _ScalarNumberOrArray = dataclasses.field(default_factory=dict)
+  numerical_data: Mapping[str, float | int | np.ndarray] = dataclasses.field(
+      default_factory=dict
+  )
+  metadata: Mapping[str, float | int | np.ndarray] = dataclasses.field(
+      default_factory=dict
+  )
   debug_outputs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
   model_id: bytes = b''
 
@@ -224,6 +227,7 @@ class Model(hk.Module):
     heads: 'Model.HeadsConfig' = base_config.autocreate()
     num_recycles: int = 10
     return_embeddings: bool = False
+    return_distogram: bool = False
 
   def __init__(self, config: Config, name: str = 'diffuser'):
     super().__init__(name=name)
@@ -327,7 +331,7 @@ class Model(hk.Module):
 
     distogram = distogram_head.DistogramHead(
         self.config.heads.distogram, self.global_config
-    )(batch, embeddings)
+    )(batch, embeddings, return_distogram=self.config.return_distogram)
 
     output = {
         'diffusion_samples': samples,
@@ -463,9 +467,8 @@ class Model(hk.Module):
     # Computing solvent accessible area with dssp can be slow for large
     # structures with lots of chains, so we parallelize the call.
     pred_structures = pred_structure.unstack()
-    num_workers = len(pred_structures)
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=num_workers
+        max_workers=min(len(pred_structures), 32)
     ) as executor:
       has_clash = list(executor.map(confidences.has_clash, pred_structures))
       fraction_disordered = list(

@@ -79,9 +79,9 @@ class Evoformer(hk.Module):
   ) -> jnp.ndarray:
     """Add relative position encodings."""
     rel_feat = featurization.create_relative_encoding(
-        batch.token_features,
-        self.config.max_relative_idx,
-        self.config.max_relative_chain,
+        seq_features=batch.token_features,
+        max_relative_idx=self.config.max_relative_idx,
+        max_relative_chain=self.config.max_relative_chain,
     )
     rel_feat = rel_feat.astype(pair_activations.dtype)
 

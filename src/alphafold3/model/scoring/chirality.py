@@ -117,7 +117,7 @@ def _mol_from_ligand_struc(
 
 def _maybe_mol_from_ccd(res_name: str) -> rd_chem.Mol | None:
   """Creates a Mol object from CCD information if res_name is in the CCD."""
-  ccd = chemical_components.cached_ccd()
+  ccd = chemical_components.Ccd()
   ccd_cif = ccd.get(res_name)
   if not ccd_cif:
     logging.warning('No ccd information for residue %s.', res_name)

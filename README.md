@@ -317,21 +317,17 @@ AlphaFold 3 uses the following separate libraries and packages:
 
 *   [abseil-cpp](https://github.com/abseil/abseil-cpp) and
     [abseil-py](https://github.com/abseil/abseil-py)
-*   [Chex](https://github.com/deepmind/chex)
 *   [Docker](https://www.docker.com)
 *   [DSSP](https://github.com/PDB-REDO/dssp)
 *   [HMMER Suite](https://github.com/EddyRivasLab/hmmer)
 *   [Haiku](https://github.com/deepmind/dm-haiku)
 *   [JAX](https://github.com/jax-ml/jax/)
-*   [jax-triton](https://github.com/jax-ml/jax-triton)
-*   [jaxtyping](https://github.com/patrick-kidger/jaxtyping)
 *   [libcifpp](https://github.com/pdb-redo/libcifpp)
 *   [NumPy](https://github.com/numpy/numpy)
 *   [pybind11](https://github.com/pybind/pybind11) and
     [pybind11_abseil](https://github.com/pybind/pybind11_abseil)
 *   [RDKit](https://github.com/rdkit/rdkit)
-*   [Tree](https://github.com/deepmind/tree)
-*   [Triton](https://github.com/triton-lang/triton)
+*   [Tokamax](https://github.com/openxla/tokamax)
 *   [tqdm](https://github.com/tqdm/tqdm)
 
 We thank all their contributors and maintainers!

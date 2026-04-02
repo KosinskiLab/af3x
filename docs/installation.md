@@ -285,6 +285,14 @@ python dependencies:
 docker build -t alphafold3 -f docker/Dockerfile .
 ```
 
+If you hit `No file descriptors available (os error 24)` on systems like
+AlmaLinux/Rocky/RHEL, you need to manually expand the file descriptor limits
+during the build by appending `--ulimit nofile=65535:65535`:
+
+```sh
+docker build --ulimit nofile=65535:65535 -t alphafold3 -f docker/Dockerfile .
+```
+
 Create an input JSON file, using either the example in the
 [README](https://github.com/google-deepmind/alphafold3?tab=readme-ov-file#installation-and-running-your-first-prediction)
 or a

@@ -280,7 +280,7 @@ class Msa:
         'msa_species_identifiers': np.array(species_ids, dtype=object),
         'num_alignments': np.array(self.depth, dtype=np.int32),
         'msa': msa,
-        'deletion_matrix_int': deletion_matrix,
+        'deletion_matrix': deletion_matrix,
     }
 
 

@@ -16,7 +16,6 @@ from alphafold3.constants import residue_names
 from alphafold3.model import feat_batch
 from alphafold3.model import features
 from alphafold3.model.components import utils
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -109,7 +108,7 @@ def gumbel_argsort_sample_idx(
   return perm[::-1]
 
 
-def create_msa_feat(msa: features.MSA) -> chex.ArrayDevice:
+def create_msa_feat(msa: features.MSA) -> jax.Array:
   """Create and concatenate MSA features."""
   msa_1hot = jax.nn.one_hot(
       msa.rows, residue_names.POLYMER_TYPES_NUM_WITH_UNKNOWN_AND_GAP + 1
@@ -137,7 +136,7 @@ def truncate_msa_batch(msa: features.MSA, num_msa: int) -> features.MSA:
 def create_target_feat(
     batch: feat_batch.Batch,
     append_per_atom_features: bool,
-) -> chex.ArrayDevice:
+) -> jax.Array:
   """Make target feat."""
   token_features = batch.token_features
   target_features = []
@@ -170,7 +169,7 @@ def create_relative_encoding(
     seq_features: features.TokenFeatures,
     max_relative_idx: int,
     max_relative_chain: int,
-) -> chex.ArrayDevice:
+) -> jax.Array:
   """Add relative position encodings."""
   rel_feats = []
   token_index = seq_features.token_index

@@ -372,13 +372,16 @@ void RegisterModuleCifDict(pybind11::module m) {
   using Value = std::vector<std::string>;
   static absl::NoDestructor<std::vector<std::string>> empty_values;
 
-  m.def("from_string", [](absl::string_view s) {
-    absl::StatusOr<CifDict> dict = CifDict::FromString(s);
-    if (!dict.ok()) {
-      throw py::value_error(dict.status().ToString());
-    }
-    return CifDict(std::move(*dict));
-  });
+  m.def(
+      "from_string",
+      [](absl::string_view s) {
+        absl::StatusOr<CifDict> dict = CifDict::FromString(s);
+        if (!dict.ok()) {
+          throw py::value_error(dict.status().ToString());
+        }
+        return *dict;
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def(
       "tokenize",
@@ -457,6 +460,16 @@ void RegisterModuleCifDict(pybind11::module m) {
                 return *result;
               },
               "Serialize to a string", py::call_guard<py::gil_scoped_release>())
+          .def(
+              "to_dict",
+              [](const CifDict& self) {
+                py::dict result;
+                for (const auto& [key, value] : *self.dict()) {
+                  result[py::cast(key)] = py::cast(value);
+                }
+                return result;
+              },
+              "Returns the CIF data as a Python dict[str, list[str]].")
           .def("value_length", &CifDict::ValueLength, py::arg("key"),
                "Num elements in value")
           .def("__len__",
@@ -603,10 +616,12 @@ void RegisterModuleCifDict(pybind11::module m) {
           py::keep_alive<0, 1>());
 
   py::class_<KeyView>(cif_dict, "KeyView")
-      .def("__contains__",
-           [](const KeyView& v, absl::string_view k) {
-             return v.map.dict()->find(k) != v.map.dict()->end();
-           })
+      .def(
+          "__contains__",
+          [](const KeyView& v, absl::string_view k) {
+            return v.map.dict()->find(k) != v.map.dict()->end();
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def("__contains__", [](const KeyView&, py::handle) { return false; })
       .def("__len__", [](const KeyView& v) { return v.map.dict()->size(); })
       .def(
@@ -630,19 +645,19 @@ void RegisterModuleCifDict(pybind11::module m) {
   cif_dict
       .def(
           "__iter__",
-          [](CifDict& self) {
+          [](const CifDict& self) {
             return py::make_key_iterator(self.dict()->begin(),
                                          self.dict()->end());
           },
           py::keep_alive<0, 1>())
       .def(
-          "keys", [](CifDict& self) { return KeyView{self}; },
+          "keys", [](const CifDict& self) { return KeyView{self}; },
           "Returns an iterable view of the map's keys.")
       .def(
-          "values", [](CifDict& self) { return ValueView{self}; },
+          "values", [](const CifDict& self) { return ValueView{self}; },
           "Returns an iterable view of the map's values.")
       .def(
-          "items", [](CifDict& self) { return ItemView{self}; },
+          "items", [](const CifDict& self) { return ItemView{self}; },
           "Returns an iterable view of the map's items.");
 }
 

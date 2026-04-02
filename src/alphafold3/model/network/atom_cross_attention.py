@@ -9,6 +9,7 @@
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
 
 """Per-atom cross attention."""
+import dataclasses
 
 from alphafold3.common import base_config
 from alphafold3.model import feat_batch
@@ -17,7 +18,6 @@ from alphafold3.model.atom_layout import atom_layout
 from alphafold3.model.components import haiku_modules as hm
 from alphafold3.model.components import utils
 from alphafold3.model.network import diffusion_transformer
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -96,7 +96,7 @@ def _per_atom_conditioning(
   return act, pair_act
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AtomCrossAttEncoderOutput:
   token_act: jnp.ndarray  # (num_tokens, ch)
   skip_connection: jnp.ndarray  # (num_subsets, num_queries, ch)
@@ -105,6 +105,13 @@ class AtomCrossAttEncoderOutput:
   keys_mask: jnp.ndarray  # (num_subsets, num_keys)
   keys_single_cond: jnp.ndarray  # (num_subsets, num_keys, ch)
   pair_cond: jnp.ndarray  # (num_subsets, num_queries, num_keys, ch)
+
+
+jax.tree_util.register_dataclass(
+    AtomCrossAttEncoderOutput,
+    data_fields=[f.name for f in dataclasses.fields(AtomCrossAttEncoderOutput)],
+    meta_fields=[],
+)
 
 
 def atom_cross_att_encoder(

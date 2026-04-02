@@ -3,10 +3,11 @@
 ## Output Directory Structure
 
 For every input job, AlphaFold 3 writes all its outputs in a directory called by
-the sanitized version of the job name. E.g. for job name "My first fold (test)",
-AlphaFold 3 will write its outputs in a directory called `my_first_fold_test`.
-If such directory already exists, AlphaFold 3 will append a timestamp to the
-directory name to avoid overwriting existing data.
+the sanitized version of the job name. E.g. for job name "My first fold (TEST)",
+AlphaFold 3 will write its outputs in a directory called `My_first_fold_TEST`
+(the case is respected). If such directory already exists, AlphaFold 3 will
+append a timestamp to the directory name to avoid overwriting existing data
+unless `--force_output_dir` is passed.
 
 The following structure is used within the output directory:
 
@@ -15,8 +16,18 @@ The following structure is used within the output directory:
     `seed-<seed value>_sample-<sample number>`. Each of these directories
     contains a confidence JSON, summary confidence JSON, and the mmCIF with the
     predicted structure.
-*   Embeddings for each seed: `seed-<seed value>_embeddings/embeddings.npz`.
-    Only saved if AlphaFold 3 is run with `--save_embeddings=true`.
+*   Distogram for each seed: `seed-<seed value>_distogram/distogram.npz`. The
+    Numpy zip file contains a single key: `distogram`. The distogram can be
+    large, its shape is `(num_tokens, num_tokens, 64)` and dtype `np.float16`
+    (almost 3 GiB for a 5,000-token input). Only saved if AlphaFold 3 is run
+    with `--save_distogram=true`.
+*   Embeddings for each seed: `seed-<seed value>_embeddings/embeddings.npz`. The
+    Numpy zip file contains 2 keys: `single_embeddings` and `pair_embeddings`.
+    The embeddings can be large, their shapes are `(num_tokens, 384)` for
+    `single_embeddings`, and `(num_tokens, num_tokens, 128)` for
+    `pair_embeddings`. Their dtype is `np.float16` (almost 6 GiB for a
+    5,000-token input). Only saved if AlphaFold 3 is run with
+    `--save_embeddings=true`.
 *   Top-ranking prediction mmCIF: `<job_name>_model.cif`. This file contains the
     predicted coordinates and should be compatible with most structural biology
     tools. We do not provide the output in the PDB format, the CIF file can be
@@ -33,41 +44,43 @@ The following structure is used within the output directory:
 Below is an example AlphaFold 3 output directory listing for a job called "Hello
 Fold", that has been ran with 1 seed and 5 samples:
 
-```text
+```txt
 hello_fold/
-├── seed-1234_embeddings          # Only saved when --save_embeddings=true.
-│   └── embeddings.npz            # Only saved when --save_embeddings=true.
+├── seed-1234_distogram                        # Only if --save_distogram=true.
+│   └── hello_fold_seed-1234_distogram.npz     # Only if --save_distogram=true.
+├── seed-1234_embeddings                       # Only if --save_embeddings=true.
+│   └── hello_fold_seed-1234_embeddings.npz    # Only if --save_embeddings=true.
 ├── seed-1234_sample-0/
-│   ├── confidences.json
-│   ├── model.cif
-│   └── summary_confidences.json
+│   ├── hello_fold_seed-1234_sample-0_confidences.json
+│   ├── hello_fold_seed-1234_sample-0_model.cif
+│   └── hello_fold_seed-1234_sample-0_summary_confidences.json
 ├── seed-1234_sample-1/
-│   ├── confidences.json
-│   ├── model.cif
-│   └── summary_confidences.json
+│   ├── hello_fold_seed-1234_sample-1_confidences.json
+│   ├── hello_fold_seed-1234_sample-1_model.cif
+│   └── hello_fold_seed-1234_sample-1_summary_confidences.json
 ├── seed-1234_sample-2/
-│   ├── confidences.json
-│   ├── model.cif
-│   └── summary_confidences.json
+│   ├── hello_fold_seed-1234_sample-2_confidences.json
+│   ├── hello_fold_seed-1234_sample-2_model.cif
+│   └── hello_fold_seed-1234_sample-2_summary_confidences.json
 ├── seed-1234_sample-3/
-│   ├── confidences.json
-│   ├── model.cif
-│   └── summary_confidences.json
+│   ├── hello_fold_seed-1234_sample-3_confidences.json
+│   ├── hello_fold_seed-1234_sample-3_model.cif
+│   └── hello_fold_seed-1234_sample-3_summary_confidences.json
 ├── seed-1234_sample-4/
-│   ├── confidences.json
-│   ├── model.cif
-│   └── summary_confidences.json
+│   ├── hello_fold_seed-1234_sample-4_confidences.json
+│   ├── hello_fold_seed-1234_sample-4_model.cif
+│   └── hello_fold_seed-1234_sample-4_summary_confidences.json
 ├── TERMS_OF_USE.md
 ├── hello_fold_confidences.json
 ├── hello_fold_data.json
 ├── hello_fold_model.cif
-├── hello_fold_summary_confidences.json
-└── ranking_scores.csv
+├── hello_fold_ranking_scores.csv
+└── hello_fold_summary_confidences.json
 ```
 
 ## Confidence Metrics
 
-Similar to AlphaFold2 and AlphaFold-Multimer, AlphaFold 3 outputs include
+Similar to AlphaFold 2 and AlphaFold-Multimer, AlphaFold 3 outputs include
 confidence metrics. The main metrics are:
 
 *   **pLDDT:** a per-atom confidence estimate on a 0-100 scale where a higher
@@ -83,7 +96,7 @@ confidence metrics. The main metrics are:
     position and orientation between two tokens in the predicted structure.
     Higher values indicate higher predicted error and therefore lower
     confidence. For proteins and nucleic acids, PAE score is essentially the
-    same as AlphaFold2, where the error is measured relative to frames
+    same as AlphaFold 2, where the error is measured relative to frames
     constructed from the protein backbone. For small molecules and
     post-translational modifications, a frame is constructed for each atom from
     its closest neighbors from a reference conformer.

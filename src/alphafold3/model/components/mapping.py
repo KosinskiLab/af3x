@@ -12,7 +12,7 @@
 
 from collections.abc import Callable, Sequence
 import functools
-from typing import Any
+from typing import Any, TypeVar
 
 import haiku as hk
 import jax
@@ -24,6 +24,8 @@ PytreeJaxArray = Any
 
 partial = functools.partial
 PROXY = object()
+
+T = TypeVar("T")
 
 
 def _maybe_slice(array, i, slice_size, axis):
@@ -82,6 +84,16 @@ def sharded_map(
     return sharded_apply(vmapped_fun, shard_size, in_axes, out_axes)
 
 
+def _set_docstring(docstr: str) -> Callable[[T], T]:
+  """Decorator for setting the docstring of a function."""
+
+  def wrapped(fun: T) -> T:
+    fun.__doc__ = docstr.format(fun=getattr(fun, "__name__", repr(fun)))
+    return fun
+
+  return wrapped
+
+
 def sharded_apply(
     fun: Callable[..., PytreeJaxArray],
     shard_size: int | None = 1,
@@ -98,7 +110,7 @@ def sharded_apply(
 
   Args:
     fun: Function to apply smap transform to.
-    shard_size: Integer denoting shard size.
+    shard_size: Integer denoting shard size. None will return `fun` unchanged.
     in_axes: Either integer or pytree describing which axis to map over for each
       input to `fun`, None denotes broadcasting.
     out_axes: Integer or pytree denoting to what axis in the output the mapped
@@ -117,11 +129,11 @@ def sharded_apply(
   if new_out_axes:
     raise NotImplementedError("New output axes not yet implemented.")
 
-  # shard size None denotes no sharding
   if shard_size is None:
     return fun
 
-  @jax.util.wraps(fun, docstr=docstr)
+  @_set_docstring(docstr)
+  @functools.wraps(fun)
   def mapped_fn(*args, **kwargs):
     # Expand in axes and determine loop range.
     in_axes_ = _expand_axes(in_axes, args)
@@ -202,37 +214,6 @@ def sharded_apply(
   return mapped_fn
 
 
-def reshape_partitioned_inputs(
-    batched_args: Sequence[PytreeJaxArray],
-    partitioned_dim: int,
-    subbatch_size: int,
-) -> Sequence[PytreeJaxArray]:
-  """Reshapes so subbatching doesn't happen on the partitioned dim."""
-  subbatched_args = []
-  for arg in batched_args:
-    shape = arg.shape
-
-    new_shape = (
-        shape[:partitioned_dim]
-        + (subbatch_size, shape[partitioned_dim] // subbatch_size)
-        + shape[partitioned_dim + 1 :]
-    )
-    subbatched_args.append(arg.reshape(new_shape))
-  return subbatched_args
-
-
-def reshape_partitioned_output(
-    output: jax.Array, output_subbatch_dim: int
-) -> jax.Array:
-  """Reshapes outputs as if reshape_partitioned_inputs were never applied."""
-  out_shape = (
-      output.shape[: output_subbatch_dim - 1]
-      + (-1,)
-      + output.shape[output_subbatch_dim + 1 :]
-  )
-  return output.reshape(out_shape)
-
-
 def inference_subbatch(
     module: Callable[..., PytreeJaxArray],
     subbatch_size: int,
@@ -240,7 +221,6 @@ def inference_subbatch(
     nonbatched_args: Sequence[PytreeJaxArray],
     input_subbatch_dim: int = 0,
     output_subbatch_dim: int | None = None,
-    input_subbatch_dim_is_partitioned: bool = False,
 ) -> PytreeJaxArray:
   """Run through subbatches (like batch apply but with split and concat)."""
   assert len(batched_args) > 0  # pylint: disable=g-explicit-length-test
@@ -252,38 +232,9 @@ def inference_subbatch(
   if output_subbatch_dim is None:
     output_subbatch_dim = input_subbatch_dim
 
-  if input_subbatch_dim_is_partitioned:
-    # Subbatching along the partitioned axis would induce an all-gather that
-    # undoes the partitioning. So instead we reshape such that
-    # [..., partitioned_input_size, ...] becomes [..., subbatch_size,
-    # partitioned_input_size // subbatch_size, ...] and then actually subbatch
-    # along the partitioned_input_size // subbatch_size axis in slices of
-    # size 1. Partitioning is then preserved on the partitioned axis, except
-    # that dimension is now of size subbatch_size instead of
-    # partitioned_input_size. Note that the module itself still sees inputs of
-    # size [..., subbatch_size, ...], just as it would if this reshaping were
-    # not applied.
-    batched_args = reshape_partitioned_inputs(
-        batched_args, input_subbatch_dim, subbatch_size
-    )
-    input_subbatch_dim += 1
-    output_subbatch_dim += 1
-    subbatch_size = 1
-
   def run_module(*batched_args):
-    if input_subbatch_dim_is_partitioned:
-      # Squeeze off the singleton dimension (otherwise the module would see
-      # [..., subbatch_size, 1, ...]).
-      batched_args = [b.squeeze(axis=input_subbatch_dim) for b in batched_args]
     args = list(batched_args) + list(nonbatched_args)
     res = module(*args)
-    if input_subbatch_dim_is_partitioned:
-      # Add back in the singleton dimension so the outputs are stacked on the
-      # axis we are actually subbatching over (i.e stacked back to
-      # [..., subbatch_size, partitioned_input_size // subbatch_size, ...]),
-      # rather than on the partitioned axis, which would again induce an
-      # all-gather that breaks partitioning.
-      res = jnp.expand_dims(res, axis=output_subbatch_dim)
     return res
 
   sharded_module = sharded_apply(
@@ -293,11 +244,5 @@ def inference_subbatch(
       out_axes=output_subbatch_dim,
   )
   output = sharded_module(*batched_args)
-  if input_subbatch_dim_is_partitioned:
-    # The is of the same shape as the inputs [..., subbatch_size,
-    # partitioned_input_size // subbatch_size, ...]. Reshape to
-    # [..., partitioned_input_size, ...] as if the reshaping due to partitioning
-    # had never been applied.
-    output = reshape_partitioned_output(output, output_subbatch_dim)
 
   return output

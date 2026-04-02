@@ -14,13 +14,14 @@ from collections.abc import Sequence
 from typing import Literal, TypeAlias
 
 from alphafold3.common import base_config
-from alphafold3.jax.attention import attention
-
+import tokamax
 
 _Shape2DType: TypeAlias = tuple[int | None, int | None]
 
 
 class GlobalConfig(base_config.BaseConfig):
+  """Global configuration for the AlphaFold3 model."""
+
   bfloat16: Literal['all', 'none', 'intermediate'] = 'all'
   final_init: Literal['zeros', 'linear'] = 'zeros'
   pair_attention_chunk_size: Sequence[_Shape2DType] = ((1536, 128), (None, 32))
@@ -29,4 +30,6 @@ class GlobalConfig(base_config.BaseConfig):
       (None, 1024),
   )
   # Note: flash_attention_implementation = 'xla' means no flash attention.
-  flash_attention_implementation: attention.Implementation = 'triton'
+  flash_attention_implementation: tokamax.DotProductAttentionImplementation = (
+      'triton'
+  )
