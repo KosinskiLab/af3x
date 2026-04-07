@@ -102,6 +102,12 @@ class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
     return self._dict.keys()
 
 
+@functools.cache
+def cached_ccd(user_ccd: str | None = None) -> 'Ccd':
+  """Returns a cached Ccd instance (loaded from pickle only once per unique user_ccd)."""
+  return Ccd(user_ccd=user_ccd)
+
+
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class ComponentInfo:
   name: str

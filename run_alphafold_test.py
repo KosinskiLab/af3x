@@ -217,7 +217,6 @@ class InferenceTest(parameterized.TestCase):
         ),
         output_dir=output_dir,
         buckets=None if bucket is None else [bucket],
-        return_all_inference_results=True,
     )
     logging.info('finished get_inference_result')
     expected_model_cif_filename = f'{fold_input.sanitised_name()}_model.cif'
@@ -489,25 +488,23 @@ class CrosslinkInferenceTest(InferenceTest):
     actual = run_alphafold.process_fold_input(
         fold_input,
         self._data_pipeline_config,
-        run_alphafold.ModelRunner(
+        model_runner=run_alphafold.ModelRunner(
             config=self._model_config,
             device=jax.local_devices(backend='gpu')[0],
             model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
         ),
         output_dir=output_dir,
         buckets=None if bucket is None else [bucket],
-        return_all_inference_results=True,
     )
 
     # --- Output directory structure ---
-    expected_model_cif_filename = f'{fold_input.sanitised_name()}_model.cif'
+    job_name = fold_input.sanitised_name()
+    expected_model_cif_filename = f'{job_name}_model.cif'
     expected_summary_confidences_filename = (
-        f'{fold_input.sanitised_name()}_summary_confidences.json'
+        f'{job_name}_summary_confidences.json'
     )
-    expected_confidences_filename = (
-        f'{fold_input.sanitised_name()}_confidences.json'
-    )
-    expected_data_json_filename = f'{fold_input.sanitised_name()}_data.json'
+    expected_confidences_filename = f'{job_name}_confidences.json'
+    expected_data_json_filename = f'{job_name}_data.json'
     prefix = f'seed-{seed}'
     self.assertSameElements(
         os.listdir(output_dir),
@@ -515,10 +512,11 @@ class CrosslinkInferenceTest(InferenceTest):
             f'{prefix}_sample-0', f'{prefix}_sample-1', f'{prefix}_sample-2',
             f'{prefix}_sample-3', f'{prefix}_sample-4',
             f'{prefix}_embeddings',
+            f'{prefix}_distogram',
             expected_confidences_filename,
             expected_model_cif_filename,
             expected_summary_confidences_filename,
-            'ranking_scores.csv',
+            f'{job_name}_ranking_scores.csv',
             expected_data_json_filename,
             'TERMS_OF_USE.md',
         ],
@@ -526,7 +524,8 @@ class CrosslinkInferenceTest(InferenceTest):
 
     # --- Embeddings: check shape consistency (no hardcoded +41 for 7BU) ---
     embeddings_dir = os.path.join(output_dir, f'{prefix}_embeddings')
-    embeddings = np.load(os.path.join(embeddings_dir, 'embeddings.npz'))
+    embeddings_filename = f'{job_name}_{prefix}_embeddings.npz'
+    embeddings = np.load(os.path.join(embeddings_dir, embeddings_filename))
     self.assertSameElements(
         embeddings.keys(), ['single_embeddings', 'pair_embeddings']
     )
@@ -559,7 +558,7 @@ class CrosslinkInferenceTest(InferenceTest):
     )
 
     # --- Ranking scores: valid range [0.0, 1.5] ---
-    with open(os.path.join(output_dir, 'ranking_scores.csv'), 'rt') as f:
+    with open(os.path.join(output_dir, f'{job_name}_ranking_scores.csv'), 'rt') as f:
       ranking_scores = list(csv.DictReader(f))
     self.assertLen(ranking_scores, 5)
     ranking_scores_values = [float(s['ranking_score']) for s in ranking_scores]
@@ -587,18 +586,13 @@ class CrosslinkInferenceTest(InferenceTest):
         self.assertEqual(token_chain_ids[:seq_len], ['A'] * seq_len)
         self.assertEqual(token_chain_ids[seq_len:2 * seq_len], ['B'] * seq_len)
 
-class CrosslinkInference9G5KTest(test_utils.StructureTestCase):
+class CrosslinkInference9G5KTest(parameterized.TestCase):
   """Inference regression test for a real crosslinked structure (9G5K)."""
 
   def setUp(self):
     super().setUp()
     self._model_config = run_alphafold.make_model_config(
         return_embeddings=False, flash_attention_implementation='triton'
-    )
-    self._runner = run_alphafold.ModelRunner(
-        config=self._model_config,
-        device=jax.local_devices()[0],
-        model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
     )
 
   def test_inference_9g5k(self):
@@ -621,7 +615,6 @@ class CrosslinkInference9G5KTest(test_utils.StructureTestCase):
             model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
         ),
         output_dir=output_dir,
-        return_all_inference_results=True,
     )
 
     # Output CIF must exist.
