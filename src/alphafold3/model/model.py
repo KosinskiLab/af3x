@@ -228,6 +228,9 @@ class Model(hk.Module):
     num_recycles: int = 10
     return_embeddings: bool = False
     return_distogram: bool = False
+    # Experimental: skip Evoformer and use pre-computed embeddings from the batch
+    # dict under keys '__injected_single__' and '__injected_pair__'.
+    inject_embeddings: bool = False
 
   def __init__(self, config: Config, name: str = 'diffuser'):
     super().__init__(name=name)
@@ -266,6 +269,11 @@ class Model(hk.Module):
     if key is None:
       key = hk.next_rng_key()
 
+    # Extract injected embeddings BEFORE batch conversion — they live only in the
+    # raw dict and are not part of feat_batch.Batch.
+    injected_single = batch.get('__injected_single__') if isinstance(batch, dict) else None
+    injected_pair = batch.get('__injected_pair__') if isinstance(batch, dict) else None
+
     batch = feat_batch.Batch.from_data_dict(batch)
 
     embedding_module = evoformer_network.Evoformer(
@@ -292,22 +300,30 @@ class Model(hk.Module):
 
     num_res = batch.num_res
 
-    embeddings = {
-        'pair': jnp.zeros(
-            [num_res, num_res, self.config.evoformer.pair_channel],
-            dtype=jnp.float32,
-        ),
-        'single': jnp.zeros(
-            [num_res, self.config.evoformer.seq_channel], dtype=jnp.float32
-        ),
-        'target_feat': target_feat,
-    }
-    if hk.running_init():
-      embeddings, _ = recycle_body(None, (embeddings, key))
+    if self.config.inject_embeddings and injected_single is not None:
+      # Skip Evoformer — use caller-supplied embeddings directly.
+      embeddings = {
+          'pair': jnp.asarray(injected_pair, dtype=jnp.float32),
+          'single': jnp.asarray(injected_single, dtype=jnp.float32),
+          'target_feat': target_feat,
+      }
     else:
-      # Number of recycles is number of additional forward trunk passes.
-      num_iter = self.config.num_recycles + 1
-      embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
+      embeddings = {
+          'pair': jnp.zeros(
+              [num_res, num_res, self.config.evoformer.pair_channel],
+              dtype=jnp.float32,
+          ),
+          'single': jnp.zeros(
+              [num_res, self.config.evoformer.seq_channel], dtype=jnp.float32
+          ),
+          'target_feat': target_feat,
+      }
+      if hk.running_init():
+        embeddings, _ = recycle_body(None, (embeddings, key))
+      else:
+        # Number of recycles is number of additional forward trunk passes.
+        num_iter = self.config.num_recycles + 1
+        embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
 
     samples = self._sample_diffusion(
         batch,
