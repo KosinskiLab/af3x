@@ -1575,7 +1575,13 @@ class Input:
         return dataclasses.replace(self, chains=out_chains)
 
     if all_links:
-        used_chain_ids = [c.id for c in self.chains]
+        # Flatten list IDs (multi-copy ligands can have id as list[str])
+        # to ensure used_chain_ids contains only individual strings, so that
+        # XL chain-ID allocation checks work correctly.
+        used_chain_ids = [
+            i for c in self.chains
+            for i in (c.id if isinstance(c.id, list) else [c.id])
+        ]
         ligands = []
         user_ccd = self.user_ccd or ""
         bonded_atom_pairs = self.bonded_atom_pairs or []
