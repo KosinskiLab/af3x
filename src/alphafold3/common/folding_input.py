@@ -808,6 +808,9 @@ class Ligand:
   ccd_ids: Sequence[str] | None = None
   smiles: str | None = None
   description: str | None = None
+  # Set to True for ligands created by expand_links() as XL molecules.
+  # Never set by the user via JSON — user-created ligands always default False.
+  is_crosslinker: bool = False
 
   def __post_init__(self):
     if (self.ccd_ids is None) == (self.smiles is None):
@@ -1008,6 +1011,13 @@ class Input:
   @property
   def ligands(self) -> Sequence[Ligand]:
     return [chain for chain in self.chains if isinstance(chain, Ligand)]
+
+  @property
+  def crosslinker_chain_ids(self) -> frozenset[str]:
+    """Chain IDs of XL ligands added by expand_links() — excludes user ligands."""
+    return frozenset(
+        c.id for c in self.chains if isinstance(c, Ligand) and c.is_crosslinker
+    )
 
   def sanitised_name(self) -> str:
     """Returns sanitised version of the name that can be used as a filename."""
@@ -1629,7 +1639,11 @@ class Input:
         for ligand in ligands:
             for ligand_id in ligand["ligand"]["id"]:
                 out_chains.append(
-                    Ligand(id=ligand_id, ccd_ids=[ligand["ligand"]["ccdCode"]])
+                    Ligand(
+                        id=ligand_id,
+                        ccd_ids=[ligand["ligand"]["ccdCode"]],
+                        is_crosslinker=True,
+                    )
                 )
 
     return dataclasses.replace(

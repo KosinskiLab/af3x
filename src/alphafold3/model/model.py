@@ -231,6 +231,11 @@ class Model(hk.Module):
     # Experimental: skip Evoformer and use pre-computed embeddings from the batch
     # dict under keys '__injected_single__' and '__injected_pair__'.
     inject_embeddings: bool = False
+    # Experimental: zero XL (is_ligand proxy) embeddings and masks before
+    # diffusion so XL atoms are excluded from the predicted structure while
+    # still informing the Evoformer pair/single representations.
+    # See local/experiments/step0_nocl/PLAN.md.
+    ablate_crosslinkers: bool = False
 
   def __init__(self, config: Config, name: str = 'diffuser'):
     super().__init__(name=name)
@@ -324,6 +329,59 @@ class Model(hk.Module):
         # Number of recycles is number of additional forward trunk passes.
         num_iter = self.config.num_recycles + 1
         embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
+
+    if self.config.ablate_crosslinkers:
+      # Zero XL token embeddings and masks before diffusion so XL atoms are
+      # excluded from the predicted structure while still informing the
+      # Evoformer pair/single representations.
+      xl = batch.token_features.is_crosslinker.astype(jnp.float32)  # (N,)
+      not_xl = 1.0 - xl
+      embeddings = dict(embeddings)  # shallow copy — do not mutate original
+      embeddings['single'] = embeddings['single'] * not_xl[:, None]
+      embeddings['pair'] = (
+          embeddings['pair'] * not_xl[:, None, None] * not_xl[None, :, None]
+      )
+      embeddings['target_feat'] = embeddings['target_feat'] * not_xl[:, None]
+      # Zero atom_mask so XL atoms get position (0,0,0) in the output CIF.
+      new_atom_mask = (
+          batch.predicted_structure_info.atom_mask * not_xl[:, None]
+      )
+      # Zero seq_mask so XL tokens are excluded from diffusion attention
+      # and pAE/pDE pair_mask computation. Cast back to original dtype
+      # (int32) so confidence head dtype assertions remain satisfied.
+      new_seq_mask = (batch.token_features.mask * not_xl).astype(
+          batch.token_features.mask.dtype
+      )
+      # Zero frames_mask so XL tokens are excluded from pTM/ipTM computation.
+      new_frames_mask = batch.frames.mask * not_xl
+      # Zero ref_structure mask and positions so XL reference conformer atoms
+      # are excluded from the atom cross-attention encoder during diffusion
+      # denoising. Without this, XL reference atoms remain active as
+      # keys/values in the local atom cross-attention window, corrupting
+      # denoising of sequentially adjacent protein residues.
+      new_ref_mask = (
+          batch.ref_structure.mask * not_xl[:, None].astype(jnp.bool_)
+      )
+      new_ref_pos = (
+          batch.ref_structure.positions * not_xl[:, None, None]
+      )
+      batch = dataclasses.replace(
+          batch,
+          predicted_structure_info=dataclasses.replace(
+              batch.predicted_structure_info, atom_mask=new_atom_mask
+          ),
+          token_features=dataclasses.replace(
+              batch.token_features, mask=new_seq_mask
+          ),
+          frames=dataclasses.replace(
+              batch.frames, mask=new_frames_mask
+          ),
+          ref_structure=dataclasses.replace(
+              batch.ref_structure,
+              mask=new_ref_mask,
+              positions=new_ref_pos,
+          ),
+      )
 
     samples = self._sample_diffusion(
         batch,

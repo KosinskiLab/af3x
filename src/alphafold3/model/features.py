@@ -914,12 +914,14 @@ class TokenFeatures:
   is_ligand: xnp_ndarray
   is_nonstandard_polymer_chain: xnp_ndarray
   is_water: xnp_ndarray
+  is_crosslinker: xnp_ndarray
 
   @classmethod
   def compute_features(
       cls,
       all_tokens: atom_layout.AtomLayout,
       padding_shapes: PaddingShapes,
+      xl_chain_ids: frozenset[str] = frozenset(),
   ) -> Self:
     """Compute the per-token features."""
 
@@ -972,6 +974,7 @@ class TokenFeatures:
         all_tokens.chain_type, standard_polymer_chain, invert=True
     )
     is_water = all_tokens.chain_type == mmcif_names.WATER
+    is_crosslinker = np.isin(all_tokens.chain_id, list(xl_chain_ids))
 
     return TokenFeatures(
         residue_index=_pad_to(residue_index, (padding_shapes.num_tokens,)),
@@ -990,6 +993,7 @@ class TokenFeatures:
             is_nonstandard_polymer_chain, (padding_shapes.num_tokens,)
         ),
         is_water=_pad_to(is_water, (padding_shapes.num_tokens,)),
+        is_crosslinker=_pad_to(is_crosslinker, (padding_shapes.num_tokens,)),
     )
 
   @classmethod
@@ -1009,6 +1013,7 @@ class TokenFeatures:
         is_ligand=batch['is_ligand'],
         is_nonstandard_polymer_chain=batch['is_nonstandard_polymer_chain'],
         is_water=batch['is_water'],
+        is_crosslinker=batch['is_crosslinker'],
     )
 
   def as_data_dict(self) -> BatchDict:
@@ -1027,6 +1032,7 @@ class TokenFeatures:
         'is_ligand': self.is_ligand,
         'is_nonstandard_polymer_chain': self.is_nonstandard_polymer_chain,
         'is_water': self.is_water,
+        'is_crosslinker': self.is_crosslinker,
     }
 
 

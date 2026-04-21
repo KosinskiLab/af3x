@@ -304,6 +304,7 @@ class WholePdbPipeline:
     batch_token_features = features.TokenFeatures.compute_features(
         all_tokens=all_tokens,
         padding_shapes=padding_shapes,
+        xl_chain_ids=fold_input.crosslinker_chain_ids,
     )
 
     # Create reference structure features
