@@ -586,6 +586,86 @@ class CrosslinkInferenceTest(InferenceTest):
         self.assertEqual(token_chain_ids[:seq_len], ['A'] * seq_len)
         self.assertEqual(token_chain_ids[seq_len:2 * seq_len], ['B'] * seq_len)
 
+  def test_inference_ablate_crosslinkers(self):
+    """Run inference with crosslinkers removed before diffusion."""
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = dataclasses.replace(fold_input, rng_seeds=[1])
+    fold_input = fold_input.expand_links()
+
+    output_dir = self.create_tempdir().full_path
+    model_config = run_alphafold.make_model_config(
+        flash_attention_implementation='triton',
+        return_embeddings=True,
+        ablate_crosslinkers=True,
+    )
+    actual = run_alphafold.process_fold_input(
+        fold_input,
+        self._data_pipeline_config,
+        model_runner=run_alphafold.ModelRunner(
+            config=model_config,
+            device=jax.local_devices(backend='gpu')[0],
+            model_dir=pathlib.Path(run_alphafold.MODEL_DIR.value),
+        ),
+        output_dir=output_dir,
+    )
+
+    job_name = fold_input.sanitised_name()
+    model_cif_path = os.path.join(output_dir, f'{job_name}_model.cif')
+    confidences_path = os.path.join(output_dir, f'{job_name}_confidences.json')
+    summary_path = os.path.join(
+        output_dir, f'{job_name}_summary_confidences.json'
+    )
+
+    output_structure = structure.from_mmcif(pathlib.Path(model_cif_path).read_text())
+    self.assertEqual(set(output_structure.chain_id), {'A', 'B'})
+
+    with open(confidences_path, 'rt') as f:
+      full_confidences = json.load(f)
+    token_chain_ids = full_confidences['token_chain_ids']
+    self.assertEqual(set(token_chain_ids), {'A', 'B'})
+    self.assertEqual(len(full_confidences['pae']), len(token_chain_ids))
+    self.assertEqual(len(full_confidences['contact_probs']), len(token_chain_ids))
+    self.assertTrue(
+        all(len(row) == len(token_chain_ids) for row in full_confidences['pae'])
+    )
+    self.assertTrue(
+        all(
+            len(row) == len(token_chain_ids)
+            for row in full_confidences['contact_probs']
+        )
+    )
+
+    with open(summary_path, 'rt') as f:
+      summary_confidences = json.load(f)
+    self.assertLen(summary_confidences['chain_pair_pae_min'], 2)
+    self.assertLen(summary_confidences['chain_pair_iptm'], 2)
+    self.assertLen(summary_confidences['chain_ptm'], 2)
+    self.assertLen(summary_confidences['chain_iptm'], 2)
+    self.assertTrue(
+        all(len(row) == 2 for row in summary_confidences['chain_pair_pae_min'])
+    )
+    self.assertTrue(
+        all(len(row) == 2 for row in summary_confidences['chain_pair_iptm'])
+    )
+
+    for actual_inf in actual:
+      for inference_result in actual_inf.inference_results:
+        self.assertEqual(
+            set(inference_result.metadata['token_chain_ids']), {'A', 'B'}
+        )
+        self.assertEqual(
+            inference_result.numerical_data['full_pae'].shape[0],
+            len(inference_result.metadata['token_chain_ids']),
+        )
+        self.assertEqual(
+            inference_result.metadata['chain_pair_pae_min'].shape,
+            (2, 2),
+        )
+        self.assertEqual(
+            inference_result.metadata['chain_pair_iptm'].shape,
+            (2, 2),
+        )
+
 class CrosslinkInference9G5KTest(parameterized.TestCase):
   """Inference regression test for a real crosslinked structure (9G5K)."""
 
