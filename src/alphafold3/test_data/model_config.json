@@ -1,4 +1,5 @@
 {
+  "ablate_crosslinkers": false,
   "evoformer": {
     "max_relative_chain": 2,
     "max_relative_idx": 32,
@@ -225,6 +226,7 @@
       "num_bins": 64
     }
   },
+  "inject_embeddings": false,
   "num_recycles": 10,
   "return_distogram": false,
   "return_embeddings": false

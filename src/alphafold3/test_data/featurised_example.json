@@ -9,6 +9,7 @@
     "entity_id": "42c714885d17f6c0fcfebebd171b5ed7d7e77a56cf9c4983d9ff9ff90995bd1c",
     "flat_output_layout": "<<atom-layout>>",
     "frames_mask": "e8a48532fba32c318f7d809fae3ea0999baa01376b29d94ef3c27d82f12f6a90",
+    "is_crosslinker": "1d83518b897b14e2943990eff655838246cc0207a7c95a5f3dfccc2e395f8bbf",
     "is_dna": "1d83518b897b14e2943990eff655838246cc0207a7c95a5f3dfccc2e395f8bbf",
     "is_ligand": "cfa4e080dc2885de94224db5075c2feb0805567d31e8898abdebaebc6646ce12",
     "is_nonstandard_polymer_chain": "1d83518b897b14e2943990eff655838246cc0207a7c95a5f3dfccc2e395f8bbf",

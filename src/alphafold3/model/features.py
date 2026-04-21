@@ -998,6 +998,10 @@ class TokenFeatures:
 
   @classmethod
   def from_data_dict(cls, batch: BatchDict) -> Self:
+    is_crosslinker = batch.get(
+        'is_crosslinker',
+        jnp.zeros_like(batch['seq_mask'], dtype=bool),
+    )
     return cls(
         residue_index=batch['residue_index'],
         token_index=batch['token_index'],
@@ -1013,7 +1017,7 @@ class TokenFeatures:
         is_ligand=batch['is_ligand'],
         is_nonstandard_polymer_chain=batch['is_nonstandard_polymer_chain'],
         is_water=batch['is_water'],
-        is_crosslinker=batch['is_crosslinker'],
+        is_crosslinker=is_crosslinker,
     )
 
   def as_data_dict(self) -> BatchDict:

@@ -30,6 +30,7 @@ from alphafold3.common.testing import data as testing_data
 from alphafold3.constants import chemical_components
 from alphafold3.data import featurisation
 from alphafold3.data import pipeline
+from alphafold3.model import features
 from alphafold3.model.atom_layout import atom_layout
 import jax
 import numpy as np
@@ -183,9 +184,9 @@ class DataPipelineTest(parameterized.TestCase):
         resources.ROOT / f'test_data/{filename}'
     ).path()
     with open(golden_path, 'r') as golden_file:
-      golden_text = golden_file.read()
+      golden_text = golden_file.read().rstrip('\n')
     with open(result_path, 'r') as result_file:
-      result_text = result_file.read()
+      result_text = result_file.read().rstrip('\n')
 
     diff = _generate_diff(result_text, golden_text)
 
@@ -372,6 +373,42 @@ class CrosslinkDataPipelineTest(DataPipelineTest):
         'rt',
     ) as f:
       out_json = json.load(f)
+
+  def test_expand_links_tracks_crosslinker_chain_ids(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = fold_input.expand_links()
+
+    ligand_ids = frozenset(ligand.id for ligand in fold_input.ligands)
+    self.assertEqual(fold_input.crosslinker_chain_ids, ligand_ids)
+    self.assertTrue(all(ligand.is_crosslinker for ligand in fold_input.ligands))
+
+
+class TokenFeaturesCompatibilityTest(absltest.TestCase):
+
+  def test_from_data_dict_defaults_is_crosslinker_to_false(self):
+    batch = {
+        'residue_index': np.array([1, 2], dtype=np.int32),
+        'token_index': np.array([1, 2], dtype=np.int32),
+        'aatype': np.array([0, 0], dtype=np.int32),
+        'seq_mask': np.array([True, True], dtype=bool),
+        'entity_id': np.array([1, 1], dtype=np.int32),
+        'asym_id': np.array([1, 1], dtype=np.int32),
+        'sym_id': np.array([1, 1], dtype=np.int32),
+        'seq_length': np.array(2, dtype=np.int32),
+        'is_protein': np.array([True, True], dtype=bool),
+        'is_rna': np.array([False, False], dtype=bool),
+        'is_dna': np.array([False, False], dtype=bool),
+        'is_ligand': np.array([False, False], dtype=bool),
+        'is_nonstandard_polymer_chain': np.array([False, False], dtype=bool),
+        'is_water': np.array([False, False], dtype=bool),
+    }
+
+    token_features = features.TokenFeatures.from_data_dict(batch)
+
+    np.testing.assert_array_equal(
+        np.asarray(token_features.is_crosslinker),
+        np.array([False, False], dtype=bool),
+    )
 
 class CrosslinkDataPipelineTest4G3Y(CrosslinkDataPipelineTest):
   """Test AlphaFold 3 inference."""
