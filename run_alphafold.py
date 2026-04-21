@@ -549,92 +549,6 @@ class ResultsForSeed:
   embeddings: dict[str, np.ndarray] | None = None
   distogram: np.ndarray | None = None
 
-
-
-def _strip_xl_from_inference_result(
-    inference_result: model.InferenceResult,
-    xl_chain_ids: set[str],
-) -> model.InferenceResult:
-  """Return a copy of inference_result with all XL chain entries removed.
-
-  Operates on in-memory numpy arrays before any file is written.  Handles:
-    - predicted_structure: XL chain atoms removed via filter_out
-    - numerical_data: pae / full_pde / contact_probs XL rows+cols removed
-    - metadata: token arrays and chain matrices stripped of XL entries
-  """
-  if not xl_chain_ids:
-    return inference_result
-
-  token_chain_ids: list[str] = list(
-      inference_result.metadata['token_chain_ids']
-  )
-
-  # Token-level keep mask
-  keep_tok = [i for i, c in enumerate(token_chain_ids) if c not in xl_chain_ids]
-
-  # Chain-level keep mask (order derived from first-occurrence in token list)
-  seen: set[str] = set()
-  chain_order: list[str] = []
-  for c in token_chain_ids:
-    if c not in seen:
-      seen.add(c)
-      chain_order.append(c)
-  keep_ch = [i for i, c in enumerate(chain_order) if c not in xl_chain_ids]
-
-  # --- predicted_structure ---
-  new_struc = inference_result.predicted_structure.filter_out(
-      chain_id=list(xl_chain_ids)
-  )
-
-  # --- numerical_data: 2-D token matrices ---
-  new_num = dict(inference_result.numerical_data)
-  for key in ('full_pae', 'full_pde', 'contact_probs'):
-    if key in new_num:
-      mat = np.asarray(new_num[key])
-      new_num[key] = mat[np.ix_(keep_tok, keep_tok)]
-
-  # --- metadata ---
-  new_meta = dict(inference_result.metadata)
-
-  # Token-level lists/arrays
-  new_meta['token_chain_ids'] = [token_chain_ids[i] for i in keep_tok]
-  res_ids = list(inference_result.metadata['token_res_ids'])
-  new_meta['token_res_ids'] = [res_ids[i] for i in keep_tok]
-
-  # Chain-level 2-D matrices
-  for key in (
-      'chain_pair_pae_min',
-      'chain_pair_iptm',
-      'chain_pair_pde_mean',
-      'chain_pair_pde_min',
-  ):
-    if key in new_meta:
-      mat = np.asarray(new_meta[key])
-      if mat.ndim == 2:
-        new_meta[key] = mat[np.ix_(keep_ch, keep_ch)]
-
-  # Chain-level 1-D vectors
-  for key in (
-      'iptm_ichain',
-      'iptm_xchain',
-      'pae_ichain',
-      'pae_xchain',
-      'intra_chain_single_pde',
-      'cross_chain_single_pde',
-  ):
-    if key in new_meta:
-      vec = np.asarray(new_meta[key])
-      if vec.ndim == 1:
-        new_meta[key] = vec[keep_ch]
-
-  return dataclasses.replace(
-      inference_result,
-      predicted_structure=new_struc,
-      numerical_data=new_num,
-      metadata=new_meta,
-  )
-
-
 def predict_structure_single(
     fold_input: folding_input.Input,
     example: Sequence[features.BatchDict],
@@ -656,17 +570,6 @@ def predict_structure_single(
     inference_results = model_runner.extract_inference_results(
         batch=example, result=result, target_name=fold_input.name
     )
-
-    # When ablate_crosslinkers is active, strip XL chains from all outputs
-    # in memory before any file is written.
-    if model_runner._model_config.ablate_crosslinkers and inference_results:
-      xl_chain_ids = fold_input.crosslinker_chain_ids
-      if xl_chain_ids:
-        print(f'  Stripping XL chain(s) {sorted(xl_chain_ids)} from outputs.')
-        inference_results = [
-            _strip_xl_from_inference_result(r, xl_chain_ids)
-            for r in inference_results
-        ]
 
     num_tokens = len(inference_results[0].metadata['token_chain_ids'])
     embeddings = model_runner.extract_embeddings(

@@ -213,6 +213,52 @@ def _compute_chain_pair_iptm(
   )
 
 
+def _ablate_crosslinkers_in_batch(
+    batch: feat_batch.Batch,
+    is_crosslinker: jnp.ndarray,
+) -> feat_batch.Batch:
+  """Returns a batch with crosslinker tokens excluded from diffusion/confidence."""
+  xl = is_crosslinker.astype(jnp.float32)  # (N,)
+  not_xl = 1.0 - xl
+  new_atom_mask = (batch.predicted_structure_info.atom_mask * not_xl[:, None]).astype(
+      batch.predicted_structure_info.atom_mask.dtype
+  )
+  new_seq_mask = (batch.token_features.mask * not_xl).astype(
+      batch.token_features.mask.dtype
+  )
+  new_frames_mask = (batch.frames.mask * not_xl).astype(batch.frames.mask.dtype)
+  new_ref_mask = batch.ref_structure.mask * not_xl[:, None].astype(jnp.bool_)
+  new_ref_pos = batch.ref_structure.positions * not_xl[:, None, None]
+  return dataclasses.replace(
+      batch,
+      predicted_structure_info=dataclasses.replace(
+          batch.predicted_structure_info, atom_mask=new_atom_mask
+      ),
+      token_features=dataclasses.replace(
+          batch.token_features, mask=new_seq_mask
+      ),
+      frames=dataclasses.replace(batch.frames, mask=new_frames_mask),
+      ref_structure=dataclasses.replace(
+          batch.ref_structure,
+          mask=new_ref_mask,
+          positions=new_ref_pos,
+      ),
+  )
+
+
+def _trim_square_matrix(
+    arr: np.ndarray,
+    keep_token_idxs: np.ndarray,
+) -> np.ndarray:
+  """Trims a [N, N] or [S, N, N] matrix to the kept token indices."""
+  arr = np.asarray(arr)
+  if arr.ndim == 2:
+    return arr[np.ix_(keep_token_idxs, keep_token_idxs)]
+  if arr.ndim == 3:
+    return arr[:, keep_token_idxs][:, :, keep_token_idxs]
+  raise ValueError(f'Expected rank-2 or rank-3 square matrix, got {arr.ndim}.')
+
+
 class Model(hk.Module):
   """Full model. Takes in data batch and returns model outputs."""
 
@@ -342,45 +388,9 @@ class Model(hk.Module):
           embeddings['pair'] * not_xl[:, None, None] * not_xl[None, :, None]
       )
       embeddings['target_feat'] = embeddings['target_feat'] * not_xl[:, None]
-      # Zero atom_mask so XL atoms get position (0,0,0) in the output CIF.
-      new_atom_mask = (
-          batch.predicted_structure_info.atom_mask * not_xl[:, None]
-      )
-      # Zero seq_mask so XL tokens are excluded from diffusion attention
-      # and pAE/pDE pair_mask computation. Cast back to original dtype
-      # (int32) so confidence head dtype assertions remain satisfied.
-      new_seq_mask = (batch.token_features.mask * not_xl).astype(
-          batch.token_features.mask.dtype
-      )
-      # Zero frames_mask so XL tokens are excluded from pTM/ipTM computation.
-      new_frames_mask = batch.frames.mask * not_xl
-      # Zero ref_structure mask and positions so XL reference conformer atoms
-      # are excluded from the atom cross-attention encoder during diffusion
-      # denoising. Without this, XL reference atoms remain active as
-      # keys/values in the local atom cross-attention window, corrupting
-      # denoising of sequentially adjacent protein residues.
-      new_ref_mask = (
-          batch.ref_structure.mask * not_xl[:, None].astype(jnp.bool_)
-      )
-      new_ref_pos = (
-          batch.ref_structure.positions * not_xl[:, None, None]
-      )
-      batch = dataclasses.replace(
-          batch,
-          predicted_structure_info=dataclasses.replace(
-              batch.predicted_structure_info, atom_mask=new_atom_mask
-          ),
-          token_features=dataclasses.replace(
-              batch.token_features, mask=new_seq_mask
-          ),
-          frames=dataclasses.replace(
-              batch.frames, mask=new_frames_mask
-          ),
-          ref_structure=dataclasses.replace(
-              batch.ref_structure,
-              mask=new_ref_mask,
-              positions=new_ref_pos,
-          ),
+      batch = _ablate_crosslinkers_in_batch(
+          batch=batch,
+          is_crosslinker=batch.token_features.is_crosslinker,
       )
 
     samples = self._sample_diffusion(
@@ -412,6 +422,8 @@ class Model(hk.Module):
         'distogram': distogram,
         **confidence_output,
     }
+    if self.config.ablate_crosslinkers:
+      output['__ablate_crosslinkers__'] = jnp.asarray(True)
     if self.config.return_embeddings:
       output['single_embeddings'] = embeddings['single']
       output['pair_embeddings'] = embeddings['pair']
@@ -442,39 +454,75 @@ class Model(hk.Module):
     """
     del target_name
     batch = feat_batch.Batch.from_data_dict(batch)
+    num_tokens = batch.token_features.seq_length.item()
+    ablate_crosslinkers = bool(
+        np.asarray(result.get('__ablate_crosslinkers__', False)).item()
+    )
+    if ablate_crosslinkers:
+      batch = _ablate_crosslinkers_in_batch(
+          batch=batch,
+          is_crosslinker=batch.token_features.is_crosslinker,
+      )
 
     # Retrieve structure and construct a predicted structure.
     pred_structure = get_predicted_structure(result=result, batch=batch)
+    asym_ids_full = batch.token_features.asym_id[:num_tokens]
+    res_ids_full = batch.token_features.residue_index[:num_tokens]
+    chain_ids_full = [pred_structure.chains[asym_id - 1] for asym_id in asym_ids_full]
+    keep_token_idxs = np.arange(num_tokens)
+    if ablate_crosslinkers:
+      is_crosslinker = np.asarray(
+          batch.token_features.is_crosslinker[:num_tokens]
+      ).astype(bool)
+      keep_token_idxs = np.flatnonzero(~is_crosslinker)
+      xl_chain_ids = sorted({chain_ids_full[idx] for idx in np.flatnonzero(is_crosslinker)})
+      if xl_chain_ids:
+        pred_structure = pred_structure.filter_out(chain_id=xl_chain_ids)
 
-    num_tokens = batch.token_features.seq_length.item()
-
-    pae_single_mask = np.tile(
-        batch.frames.mask[:, None],
-        [1, batch.frames.mask.shape[0]],
+    asym_ids = asym_ids_full[keep_token_idxs]
+    res_ids = res_ids_full[keep_token_idxs]
+    chain_ids = [chain_ids_full[idx] for idx in keep_token_idxs]
+    num_tokens = len(keep_token_idxs)
+    frames_mask = np.asarray(batch.frames.mask[: batch.frames.mask.shape[0]])[
+        keep_token_idxs
+    ]
+    pae_single_mask = np.tile(frames_mask[:, None], [1, num_tokens])
+    full_pae = _trim_square_matrix(result['full_pae'], keep_token_idxs)
+    full_pde = _trim_square_matrix(result['full_pde'], keep_token_idxs)
+    contact_probs = _trim_square_matrix(
+        result['distogram']['contact_probs'], keep_token_idxs
     )
-    ptm = _compute_ptm(
-        result=result,
-        num_tokens=num_tokens,
-        asym_id=batch.token_features.asym_id[:num_tokens],
-        pae_single_mask=pae_single_mask,
-        interface=False,
+    tmscore_adjusted_pae_global = _trim_square_matrix(
+        result['tmscore_adjusted_pae_global'], keep_token_idxs
     )
-    iptm = _compute_ptm(
-        result=result,
-        num_tokens=num_tokens,
-        asym_id=batch.token_features.asym_id[:num_tokens],
-        pae_single_mask=pae_single_mask,
-        interface=True,
+    tmscore_adjusted_pae_interface = _trim_square_matrix(
+        result['tmscore_adjusted_pae_interface'], keep_token_idxs
+    )
+    ptm = np.stack(
+        [
+            confidences.predicted_tm_score(
+                tm_adjusted_pae=sample_tm_adjusted_pae,
+                asym_id=asym_ids,
+                pair_mask=pae_single_mask,
+                interface=False,
+            )
+            for sample_tm_adjusted_pae in tmscore_adjusted_pae_global
+        ],
+        axis=0,
+    )
+    iptm = np.stack(
+        [
+            confidences.predicted_tm_score(
+                tm_adjusted_pae=sample_tm_adjusted_pae,
+                asym_id=asym_ids,
+                pair_mask=pae_single_mask,
+                interface=True,
+            )
+            for sample_tm_adjusted_pae in tmscore_adjusted_pae_interface
+        ],
+        axis=0,
     )
     ptm_iptm_average = 0.8 * iptm + 0.2 * ptm
-
-    asym_ids = batch.token_features.asym_id[:num_tokens]
-    # Map asym IDs back to chain IDs. Asym IDs are constructed from chain IDs by
-    # iterating over the chain IDs, and for each unique chain ID incrementing
-    # the asym ID by 1 and mapping it to the particular chain ID. Asym IDs are
-    # 1-indexed, so subtract 1 to get back to the chain ID.
-    chain_ids = [pred_structure.chains[asym_id - 1] for asym_id in asym_ids]
-    res_ids = batch.token_features.residue_index[:num_tokens]
 
     if len(np.unique(asym_ids[:num_tokens])) > 1:
       # There is more than one chain, hence interface pTM (i.e. ipTM) defined,
@@ -484,42 +532,41 @@ class Model(hk.Module):
       # There is only one chain, hence ipTM=NaN, so use just pTM.
       ranking_confidence = ptm
 
-    contact_probs = result['distogram']['contact_probs']
     # Compute PAE related summaries.
     _, chain_pair_pae_min, _ = confidences.chain_pair_pae(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pae=result['full_pae'],
+        asym_ids=asym_ids,
+        full_pae=full_pae,
         mask=pae_single_mask,
     )
     chain_pair_pde_mean, chain_pair_pde_min = confidences.chain_pair_pde(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pde=result['full_pde'],
+        asym_ids=asym_ids,
+        full_pde=full_pde,
     )
     intra_chain_single_pde, cross_chain_single_pde, _ = confidences.pde_single(
         num_tokens,
-        batch.token_features.asym_id,
-        result['full_pde'],
+        asym_ids,
+        full_pde,
         contact_probs,
     )
     pae_metrics = confidences.pae_metrics(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pae=result['full_pae'],
+        asym_ids=asym_ids,
+        full_pae=full_pae,
         mask=pae_single_mask,
         contact_probs=contact_probs,
-        tm_adjusted_pae=result['tmscore_adjusted_pae_interface'],
+        tm_adjusted_pae=tmscore_adjusted_pae_interface,
     )
     ranking_confidence_pae = confidences.rank_metric(
-        result['full_pae'],
-        contact_probs * batch.frames.mask[:, None].astype(float),
+        full_pae,
+        contact_probs * frames_mask[:, None].astype(float),
     )
     chain_pair_iptm = _compute_chain_pair_iptm(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
+        asym_ids=asym_ids,
         mask=pae_single_mask,
-        tm_adjusted_pae=result['tmscore_adjusted_pae_interface'],
+        tm_adjusted_pae=tmscore_adjusted_pae_interface,
     )
     # iptm_ichain is a vector of per-chain ptm values. iptm_ichain[0],
     # for example, is just the zeroth diagonal entry of the chain pair iptm
@@ -559,9 +606,9 @@ class Model(hk.Module):
       yield InferenceResult(
           predicted_structure=pred_structure,
           numerical_data={
-              'full_pde': result['full_pde'][idx, :num_tokens, :num_tokens],
-              'full_pae': result['full_pae'][idx, :num_tokens, :num_tokens],
-              'contact_probs': contact_probs[:num_tokens, :num_tokens],
+              'full_pde': full_pde[idx],
+              'full_pae': full_pae[idx],
+              'contact_probs': contact_probs,
           },
           metadata={
               'predicted_distance_error': predicted_distance_errors[idx],
