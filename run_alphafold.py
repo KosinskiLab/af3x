@@ -823,6 +823,10 @@ def process_fold_input(
     print('Skipping model inference...')
     output = fold_input
   else:
+    # Expand XLs after writing the JSON, so the JSON stays reusable as input.
+    if fold_input.disulfide_bonds or fold_input.crosslinks:
+      fold_input = fold_input.expand_links()
+
     print(
         f'Predicting 3D structure for {fold_input.name} with'
         f' {len(fold_input.rng_seeds)} seed(s)...'
@@ -1099,8 +1103,6 @@ def main(_):
     if _NUM_SEEDS.value is not None:
       print(f'Expanding fold job {fold_input.name} to {_NUM_SEEDS.value} seeds')
       fold_input = fold_input.with_multiple_seeds(_NUM_SEEDS.value)
-    if _RUN_INFERENCE.value and (fold_input.disulfide_bonds or fold_input.crosslinks):
-      fold_input = fold_input.expand_links()
     process_fold_input(
         fold_input=fold_input,
         data_pipeline_config=data_pipeline_config,

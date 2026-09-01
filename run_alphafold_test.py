@@ -482,8 +482,8 @@ class CrosslinkInferenceTest(InferenceTest):
     """Run AlphaFold 3 inference with crosslinks."""
     fold_input = folding_input.Input.from_json(self._test_input_json)
     fold_input = dataclasses.replace(fold_input, rng_seeds=[seed])
-    fold_input = fold_input.expand_links()  # Add crosslinker ligands (chains C, D)
 
+    # process_fold_input expands the XLs (adds crosslinker ligand chains C, D).
     output_dir = self.create_tempdir().full_path
     actual = run_alphafold.process_fold_input(
         fold_input,
@@ -571,11 +571,12 @@ class CrosslinkInferenceTest(InferenceTest):
     ).read_text()
     output_structure = structure.from_mmcif(output_cif_content)
     output_chain_ids = set(output_structure.chain_id)
-    self.assertIn('A', output_chain_ids)
-    self.assertIn('B', output_chain_ids)
-    self.assertNotEmpty(
-        output_chain_ids - {'A', 'B'},
-        msg='Crosslinker ligand chains must appear in output CIF.',
+    # Exactly two crosslinker ligands (C, D) — extra chains mean expand_links
+    # ran more than once.
+    self.assertEqual(
+        output_chain_ids,
+        {'A', 'B', 'C', 'D'},
+        msg='Expected exactly the two crosslinker ligand chains C and D.',
     )
 
     # --- Token chain IDs: protein chains A and B should be first ---
@@ -590,8 +591,8 @@ class CrosslinkInferenceTest(InferenceTest):
     """Run inference with crosslinkers removed before diffusion."""
     fold_input = folding_input.Input.from_json(self._test_input_json)
     fold_input = dataclasses.replace(fold_input, rng_seeds=[1])
-    fold_input = fold_input.expand_links()
 
+    # process_fold_input expands the XLs before featurisation.
     output_dir = self.create_tempdir().full_path
     model_config = run_alphafold.make_model_config(
         flash_attention_implementation='triton',
@@ -683,8 +684,8 @@ class CrosslinkInference9G5KTest(parameterized.TestCase):
     fold_input = folding_input.Input.from_json(
         pathlib.Path(input_path).read_text()
     )
-    fold_input = fold_input.expand_links()  # Adds chain C (azide-A-DSBSO ligand)
 
+    # process_fold_input expands the XLs (adds chain C, the azide-A-DSBSO ligand).
     output_dir = self.create_tempdir().full_path
     actual = run_alphafold.process_fold_input(
         fold_input,
@@ -706,11 +707,12 @@ class CrosslinkInference9G5KTest(parameterized.TestCase):
     output_cif_content = pathlib.Path(output_cif_path).read_text()
     output_structure = structure.from_mmcif(output_cif_content)
     output_chain_ids = set(output_structure.chain_id)
-    self.assertIn('A', output_chain_ids)
-    self.assertIn('B', output_chain_ids)
-    self.assertNotEmpty(
-        output_chain_ids - {'A', 'B'},
-        msg='Crosslinker ligand chain must appear in 9G5K output CIF.',
+    # Exactly one crosslinker ligand (C) — an extra chain means expand_links
+    # ran more than once.
+    self.assertEqual(
+        output_chain_ids,
+        {'A', 'B', 'C'},
+        msg='Expected exactly one crosslinker ligand chain C for 9G5K.',
     )
 
     # pLDDT check: at least 50% of atoms should have b_factor > 50.

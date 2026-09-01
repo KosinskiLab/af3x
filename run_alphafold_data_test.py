@@ -703,5 +703,52 @@ class CrosslinkWithBondedAtomPairsTest(absltest.TestCase):
     self.assertLen(fold_input.bonded_atom_pairs, 1)
 
 
+class CrosslinkDataJsonReuseTest(absltest.TestCase):
+  """The written _data.json must stay reusable as input for another run.
+
+  process_fold_input writes the JSON before expanding, so expansion products
+  (crosslinker ligands, XL bonds, appended CCD entries) are never serialised.
+  Re-running on the written file must reproduce the same expansion.
+  """
+
+  def setUp(self):
+    super().setUp()
+    fn = testing_data.Data(
+        resources.ROOT / 'test_data/crosslinks/9G5K/9G5K_input.json').path()
+    with open(fn, 'r') as f:
+      self._fold_input = folding_input.Input.from_json(f.read())
+
+  def _written_json(self) -> str:
+    output_dir = self.create_tempdir().full_path
+    run_alphafold.process_fold_input(
+        fold_input=self._fold_input,
+        data_pipeline_config=None,
+        model_runner=None,
+        output_dir=output_dir,
+    )
+    path = os.path.join(
+        output_dir, f'{self._fold_input.sanitised_name()}_data.json')
+    with open(path, 'r') as f:
+      return f.read()
+
+  def test_written_json_matches_input(self):
+    self.assertEqual(self._written_json(), self._fold_input.to_json())
+
+  def test_written_json_has_no_expansion_products(self):
+    written = json.loads(self._written_json())
+    self.assertIsNone(written['bondedAtomPairs'])
+    self.assertIsNone(written['userCCD'])
+    self.assertEmpty([s for s in written['sequences'] if 'ligand' in s])
+    self.assertEqual(
+        [xl['name'] for xl in written['crosslinks']], ['azide-A-DSBSO'])
+
+  def test_reused_json_expands_identically(self):
+    reused = folding_input.Input.from_json(self._written_json())
+    self.assertEqual(
+        reused.expand_links().to_json(),
+        self._fold_input.expand_links().to_json(),
+    )
+
+
 if __name__ == '__main__':
   absltest.main()
