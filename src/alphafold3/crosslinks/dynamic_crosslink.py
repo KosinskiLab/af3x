@@ -91,7 +91,7 @@ def rigid_smiles(n: int):
     if n == 1:
         return base
 
-    smiles = base1
+    smiles = base
     for i in range(2, n + 1):
         num = i if i < 10 else f'%{i}'
         smiles = f"c{num}c{smiles}cc{num}"
