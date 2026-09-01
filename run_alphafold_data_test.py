@@ -579,5 +579,129 @@ class CrosslinkErrorHandlingTest(absltest.TestCase):
     self.assertEqual(len(expanded.protein_chains), 2)
 
 
+# Minimal valid user CCD entry for a two-atom ligand.
+_USER_CCD = """data_MYL
+#
+_chem_comp.formula                 "C H4 O"
+_chem_comp.formula_weight          32.04
+_chem_comp.id                      MYL
+_chem_comp.mon_nstd_parent_comp_id ?
+_chem_comp.name                    "Test ligand"
+_chem_comp.pdbx_synonyms           ?
+_chem_comp.type                    non-polymer
+#
+loop_
+_chem_comp_atom.atom_id
+_chem_comp_atom.charge
+_chem_comp_atom.comp_id
+_chem_comp_atom.pdbx_model_Cartn_x_ideal
+_chem_comp_atom.pdbx_model_Cartn_y_ideal
+_chem_comp_atom.pdbx_model_Cartn_z_ideal
+_chem_comp_atom.type_symbol
+C1 0 MYL 0.000 0.000 0.000 C
+O1 0 MYL 1.400 0.000 0.000 O
+#
+loop_
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.comp_id
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.value_order
+C1 O1 MYL N SING
+#
+"""
+
+
+class CrosslinkWithBondedAtomPairsTest(absltest.TestCase):
+  """expand_links must keep user-supplied bonds when adding XL bonds.
+
+  __post_init__ coerces bonded_atom_pairs to a tuple, so expand_links has to
+  copy it into a list before extending. Inputs carrying a userCCD hit this first
+  because naming atoms in a userCCD is what makes them bondable, but the trigger
+  is bondedAtomPairs, not the userCCD.
+  """
+
+  _SEQUENCE = CrosslinkErrorHandlingTest._LYS_SEQUENCE
+
+  def _make_input(self, *, user_ccd=None, ligand=None, bonds=None,
+                  crosslinks=None, disulfide_bonds=None):
+    sequences = [
+        {'protein': {'id': 'A', 'sequence': self._SEQUENCE, 'modifications': [],
+                     'unpairedMsa': None, 'pairedMsa': None}},
+        {'protein': {'id': 'B', 'sequence': self._SEQUENCE, 'modifications': [],
+                     'unpairedMsa': None, 'pairedMsa': None}},
+    ]
+    if ligand is not None:
+      sequences.append({'ligand': ligand})
+    raw = {
+        'name': 'test',
+        'modelSeeds': [1],
+        'sequences': sequences,
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    }
+    if user_ccd is not None:
+      raw['userCCD'] = user_ccd
+    if bonds is not None:
+      raw['bondedAtomPairs'] = bonds
+    if crosslinks is not None:
+      raw['crosslinks'] = crosslinks
+    if disulfide_bonds is not None:
+      raw['disulfide_bonds'] = disulfide_bonds
+    return folding_input.Input.from_json(json.dumps(raw))
+
+  _DSSO = [{'name': 'DSSO', 'residue_pairs': [(('A', 5), ('B', 5))]}]
+  _USER_BOND = [(('A', 1, 'CB'), ('L', 1, 'C1'))]
+  _LIGAND = {'id': 'L', 'ccdCodes': ['MYL']}
+
+  def test_user_ccd_bond_survives_crosslink_expansion(self):
+    """A userCCD ligand bond and the XL bonds must coexist."""
+    fold_input = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND,
+        bonds=self._USER_BOND, crosslinks=self._DSSO,
+    )
+    self.assertIsInstance(fold_input.bonded_atom_pairs, tuple)
+
+    expanded = fold_input.expand_links()
+
+    # One user bond plus two XL bonds (one per crosslinked residue).
+    self.assertLen(expanded.bonded_atom_pairs, 3)
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'C1')), expanded.bonded_atom_pairs)
+    self.assertEqual(expanded.crosslinker_chain_ids, frozenset({'C'}))
+    # The user CCD entry must survive alongside the appended crosslinker entry.
+    ccd = chemical_components.cached_ccd(user_ccd=expanded.user_ccd)
+    self.assertIn('MYL', ccd)
+    self.assertIn('DSSO', ccd)
+
+  def test_bonded_atom_pairs_without_user_ccd(self):
+    """The trigger is bondedAtomPairs, not the userCCD."""
+    expanded = self._make_input(
+        ligand={'id': 'L', 'ccdCodes': ['ATP']},
+        bonds=[(('A', 1, 'CB'), ('L', 1, 'PA'))],
+        crosslinks=self._DSSO,
+    ).expand_links()
+
+    self.assertLen(expanded.bonded_atom_pairs, 3)
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'PA')), expanded.bonded_atom_pairs)
+
+  def test_bonded_atom_pairs_with_disulfide_bonds(self):
+    """Disulfide expansion goes through the same code path."""
+    expanded = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND, bonds=self._USER_BOND,
+        disulfide_bonds=[{'residue_pairs': [(('A', 6), ('A', 14))]}],
+    ).expand_links()
+
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'C1')), expanded.bonded_atom_pairs)
+
+  def test_expand_links_does_not_mutate_input(self):
+    """expand_links must not extend the caller's bonded_atom_pairs in place."""
+    fold_input = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND,
+        bonds=self._USER_BOND, crosslinks=self._DSSO,
+    )
+    fold_input.expand_links()
+    self.assertLen(fold_input.bonded_atom_pairs, 1)
+
+
 if __name__ == '__main__':
   absltest.main()

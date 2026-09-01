@@ -1594,7 +1594,7 @@ class Input:
         ]
         ligands = []
         user_ccd = self.user_ccd or ""
-        bonded_atom_pairs = self.bonded_atom_pairs or []
+        bonded_atom_pairs = list(self.bonded_atom_pairs or [])
 
         if self.crosslinks:
           logging.info("Adding crosslinks")
