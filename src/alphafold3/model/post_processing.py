@@ -15,6 +15,7 @@ import datetime
 import os
 
 from alphafold3 import version
+from alphafold3.common import af3x_version
 from alphafold3.model import confidence_types
 from alphafold3.model import mmcif_metadata
 from alphafold3.model import model
@@ -54,7 +55,9 @@ def post_process_inference_result(
   timestamp = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
   cif_with_metadata = mmcif_metadata.add_metadata_to_mmcif(
       old_cif=inference_result.predicted_structure.to_mmcif_dict(),
-      version=f'{version.__version__} @ {timestamp}',
+      version=(
+          f'{version.__version__} AF3x {af3x_version.short_id()} @ {timestamp}'
+      ),
       model_id=inference_result.model_id,
   )
   cif = mmcif_metadata.add_legal_comment(cif_with_metadata.to_string())

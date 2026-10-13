@@ -248,6 +248,8 @@ class InferenceTest(parameterized.TestCase):
             f'{fold_input.sanitised_name()}_ranking_scores.csv',
             # The input JSON defining the job.
             expected_data_json_filename,
+            # AF3x code version stamp.
+            f'{fold_input.sanitised_name()}_af3x_version.json',
             # The output terms of use.
             'TERMS_OF_USE.md',
         ],
@@ -518,6 +520,7 @@ class CrosslinkInferenceTest(InferenceTest):
             expected_summary_confidences_filename,
             f'{job_name}_ranking_scores.csv',
             expected_data_json_filename,
+            f'{job_name}_af3x_version.json',
             'TERMS_OF_USE.md',
         ],
     )

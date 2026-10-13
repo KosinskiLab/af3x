@@ -24,6 +24,7 @@ from typing import Any
 from absl.testing import absltest
 from absl.testing import parameterized
 from alphafold3 import structure
+from alphafold3.common import af3x_version
 from alphafold3.common import folding_input
 from alphafold3.common import resources
 from alphafold3.common.testing import data as testing_data
@@ -748,6 +749,33 @@ class CrosslinkDataJsonReuseTest(absltest.TestCase):
         reused.expand_links().to_json(),
         self._fold_input.expand_links().to_json(),
     )
+
+
+class Af3xVersionTest(absltest.TestCase):
+  """Version stamp written next to inference outputs."""
+
+  def test_write_version_info(self):
+    output_dir = self.create_tempdir().full_path
+    path = af3x_version.write_version_info(output_dir, 'job')
+    self.assertEqual(path, os.path.join(output_dir, 'job_af3x_version.json'))
+    with open(path, 'rt') as f:
+      info = json.load(f)
+    self.assertEqual(
+        info['af3_upstream_commit'], af3x_version.AF3_UPSTREAM_COMMIT
+    )
+    self.assertIn('jax', info['packages'])
+    self.assertIn('written_at', info)
+    if info['af3x_commit'] is not None:
+      self.assertRegex(info['af3x_commit'], r'^[0-9a-f]{40}$')
+      self.assertIsInstance(info['af3x_dirty'], bool)
+
+  def test_short_id(self):
+    info = af3x_version.get_version_info()
+    short_id = af3x_version.short_id()
+    if info['af3x_commit'] is None:
+      self.assertEqual(short_id, 'unknown')
+    else:
+      self.assertTrue(short_id.startswith(info['af3x_commit'][:12]))
 
 
 if __name__ == '__main__':

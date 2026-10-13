@@ -36,6 +36,7 @@ from typing import overload
 
 from absl import app
 from absl import flags
+from alphafold3.common import af3x_version
 from alphafold3.common import folding_input
 from alphafold3.common import resources
 from alphafold3.constants import chemical_components
@@ -860,6 +861,7 @@ def process_fold_input(
     ).read_text()
 
     os.makedirs(output_dir, exist_ok=True)
+    af3x_version.write_version_info(output_dir, job_name)
 
     all_inference_results = []
     for seed, example in zip(fold_input.rng_seeds, featurised_examples):
@@ -938,6 +940,7 @@ def process_fold_input(
   return output
 
 def main(_):
+  print(f'AF3x version: {af3x_version.short_id()}')
   if _JAX_COMPILATION_CACHE_DIR.value is not None:
     jax.config.update(
         'jax_compilation_cache_dir', _JAX_COMPILATION_CACHE_DIR.value
