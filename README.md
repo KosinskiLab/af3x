@@ -179,9 +179,10 @@ The test data is available in `af3x/src/alphafold3/test_data/crosslinks` folder.
 
 ![header](docs/header.jpg)
 
-This package provides an implementation of the inference pipeline of AlphaFold
-3. See below for how to access the model parameters. You may only use AlphaFold
-3 model parameters if received directly from Google. Use is subject to these
+This package provides an implementation of the inference pipeline of
+AlphaFold 3. See below for how to access the model parameters. You may only use
+AlphaFold 3 model parameters if received directly from Google. Use is subject to
+these
 [terms of use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
 
 Any publication that discloses findings arising from using this source code, the
@@ -197,18 +198,32 @@ AlphaFold 3 is also available at
 [alphafoldserver.com](https://alphafoldserver.com) for non-commercial use,
 though with a more limited set of ligands and covalent modifications.
 
+For commercial use, AlphaFold 3 is available via
+[Gemini Enterprise Agent Platform on Google Cloud](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/open-models/alphafold-3).
+
 If you have any questions, please contact the AlphaFold team at
 [alphafold@google.com](mailto:alphafold@google.com).
 
 ## Obtaining Model Parameters
 
-This repository contains all necessary code for AlphaFold 3 inference. To
-request access to the AlphaFold 3 model parameters, please complete
-[this form](https://forms.gle/svvpY4u2jsHEwWYS6). Access will be granted at
-Google DeepMind’s sole discretion. We will aim to respond to requests within 2–3
-business days. You may only use AlphaFold 3 model parameters if received
-directly from Google. Use is subject to these
+This repository contains all necessary code for AlphaFold 3 inference. You can
+download the AlphaFold 3 model parameters from
+https://storage.googleapis.com/alphafold3/af3.bin.zst. Use is subject to these
 [terms of use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
+
+The model parameters for the SynthID Bio-structure version of AlphaFold 3, which
+predicts watermarked structures, is available at
+https://storage.googleapis.com/alphafold3/af3_synthid.bin.zst. See
+[google-deepmind/synthidbio](https://github.com/google-deepmind/synthidbio) for
+more details.
+
+The model parameters for AlphaFold 3 Leaving Atom (AF3-LA) can be used as an
+alternative model fine-tuned for leaving atom handling. The weights are
+available at https://storage.googleapis.com/alphafold3/af3_leaving_atom.bin.zst
+and are subject to the same terms of use as the original AlphaFold 3 model
+parameters. See
+[google-deepmind/alphaprotein-novo](https://github.com/google-deepmind/alphaprotein-novo)
+for more details.
 
 ## Installation and Running Your First Prediction
 
@@ -341,6 +356,9 @@ We would love to hear your feedback and understand how AlphaFold 3 has been
 useful in your research. Share your stories with us at
 [alphafold@google.com](mailto:alphafold@google.com).
 
+For questions surrounding SynthID Bio-structure, please contact
+[synthidbio@google.com](mailto:synthidbio@google.com).
+
 ## Licence and Disclaimer
 
 This is not an officially supported Google product.
@@ -349,11 +367,10 @@ Copyright 2024 DeepMind Technologies Limited.
 
 ### AlphaFold 3 Source Code and Model Parameters
 
-The AlphaFold 3 source code is licensed under the Creative Commons
-Attribution-Non-Commercial ShareAlike International License, Version 4.0
-(CC-BY-NC-SA 4.0) (the "License"); you may not use this file except in
-compliance with the License. You may obtain a copy of the License at
-[https://github.com/google-deepmind/alphafold3/blob/main/LICENSE](https://github.com/google-deepmind/alphafold3/blob/main/LICENSE).
+AlphaFold 3 source code is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use its source code except in compliance with the
+License. You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0.
 
 The AlphaFold 3 model parameters are made available under the
 [AlphaFold 3 Model Parameters Terms of Use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md)

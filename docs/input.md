@@ -1,13 +1,28 @@
 # AlphaFold 3 Input
 
+This is documentation for the AlphaFold 3 JSON input format. If you are looking
+for documentation of the AlphaFold 3 Google Cloud API, please refer to
+[this API reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/open-models/alphafold-3#api-reference).
+
 ## Specifying Input Files
 
 You can provide inputs to `run_alphafold.py` in one of two ways:
 
 -   Single input file: Use the `--json_path` flag followed by the path to a
-    single JSON file.
+    single JSON file. This path can be either a local path or a Google Cloud
+    Storage path (starting with `gs://`), if enabled.
 -   Multiple input files: Use the `--input_dir` flag followed by the path to a
-    directory of JSON files.
+    directory of JSON files. This path can be either a local directory path or a
+    GCS path, if enabled.
+-   Within an input file, fields with names ending in `Path` (e.g.
+    `pairedMsaPath`) can be provided as Google Cloud Storage paths, if enabled.
+
+### Note: Google Cloud Storage paths
+
+Google Cloud Storage (`gs://`) paths are supported for certain flags and fields
+if the optional `gcsfs` dependency is installed. See the
+[installation instructions](installation.md#optional-enable-google-cloud-storage-path-support)
+for details and a complete list of supported paths.
 
 ## Input Format
 
@@ -28,6 +43,9 @@ The custom AlphaFold 3 format allows:
     them via the [user-provided CCD](#user-provided-ccd).
 *   Specifying covalent bonds between entities.
 *   Specifying multiple random seeds.
+
+Multiple examples of input JSON files are provided in
+https://github.com/google-deepmind/alphafold3/tree/main/examples.
 
 ## AlphaFold Server JSON Compatibility
 
@@ -721,6 +739,11 @@ You will need to specify:
 2.  Ligand chain B with the 4 components.
 3.  Bonds ASN-CMP1, CMP1-CMP2, CMP2-CMP3, CMP2-CMP4.
 
+When a glycan component is linked, AlphaFold 3 removes its atom named `O1`
+(unless `O1` is the bonded atom). This is correct for aldoses but not for
+ketoses such as sialic acids or fructose, see
+[Known Issues](known_issues.md#linked-ketoses-keep-their-leaving-atom).
+
 ## User-provided CCD
 
 There are two approaches to model a custom ligand not defined in the CCD:
@@ -742,6 +765,39 @@ as it could cause issues in the mmCIF format.
 
 The newly defined ligand can then be used as a standard CCD ligand using its
 custom name, and bonds can be linked to it using its named atom scheme.
+
+### Using user-provided CCD for polymer modifications
+
+The user-provided CCD can also be used for specifying non-canonical amino acids
+or nucleotides in the protein/RNA/DNA chains, not only custom ligands.
+
+In this case, the custom component is referenced from the polymer
+`modifications` field using its CCD component ID:
+
+```json
+{
+  "protein": {
+    "id": "A",
+    "sequence": "MDQHQAFKEATELLEKMKTSSDEERVEYLRKAVRLFNLTSEGQQGELVGKFKEAGVLIRAVDLS",
+    "modifications": [{"ptmType": "MYMOD", "ptmPosition": 30}]
+  }
+}
+```
+
+In the example above, residue 30 is replaced by the custom component `MYMOD`.
+
+*   `ptmType` must match the component ID defined in the user-provided CCD.
+*   The user-provided CCD should describe an appropriate peptide-linking polymer
+    component rather than a free non-polymer ligand.
+*   The user-provided CCD entry should include the expected backbone atoms and
+    bond graph for the residue, adjusted for the residue position in the polymer
+    chain. E.g. atoms and bond graphs for the mid-chain residue and terminal
+    residue may differ.
+
+The same principle applies to RNA and DNA chains. This workflow is useful for
+modeling non-canonical amino acids or nucleotides in the context of polymer
+chains. By contrast, external covalent ligands should generally be modeled as
+ligand entities plus `bondedAtomPairs`.
 
 ### Conformer Generation
 
@@ -887,7 +943,9 @@ to the model, but they are necessary for the data pipeline to run – see the
 *   `_chem_comp_atom.type_symbol`: Atom element type.
 *   `_chem_comp_atom.charge`: Atom charge.
 *   `_chem_comp_atom.pdbx_leaving_atom_flag`: Optional flag determining whether
-    this is a leaving atom. If unset, assumed to be no (`N`) for all atoms.
+    this is a leaving atom. If unset, assumed to be no (`N`) for all atoms. Note
+    that this flag does not decide which atoms are removed when the component is
+    bonded to another residue.
 *   `_chem_comp_atom.pdbx_model_Cartn_x_ideal`: Ideal x coordinate.
 *   `_chem_comp_atom.pdbx_model_Cartn_y_ideal`: Ideal y coordinate.
 *   `_chem_comp_atom.pdbx_model_Cartn_z_ideal`: Ideal z coordinate.

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -13,11 +22,32 @@
 import collections
 from collections.abc import Mapping, Sequence
 import dataclasses
-import typing
 from typing import Self
 
+from alphafold3.cpp import indexing
+from alphafold3.cpp import membership
 from alphafold3.structure import table
 import numpy as np
+
+
+def _validate_atom_ends(atom_ends: np.ndarray, *, max_end: int) -> None:
+  """Raises ValueError if `atom_ends` is not a valid 1D range-end array."""
+  if (
+      atom_ends.ndim != 1
+      or not np.issubdtype(atom_ends.dtype, np.integer)
+      or (
+          atom_ends.size > 0
+          and (
+              int(atom_ends[0]) < 0
+              or int(atom_ends[-1]) > max_end
+              or np.any(atom_ends[1:] < atom_ends[:-1])
+          )
+      )
+  ):
+    raise ValueError(
+        'atom_ends must be a 1D non-decreasing integer array within'
+        f' [0, {max_end}].'
+    )
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -56,34 +86,86 @@ class Bonds(table.Table):
       atom_key: np.ndarray,
   ) -> tuple[np.ndarray, np.ndarray]:
     """Returns the indices of the from/dest atoms in the atom_key array."""
-    from_atom_missing = ~np.isin(self.from_atom_key, atom_key)
-    dest_atom_missing = ~np.isin(self.dest_atom_key, atom_key)
-    if np.any(from_atom_missing):
-      raise ValueError(
-          f'No atoms for from_atom_key {self.from_atom_key[from_atom_missing]}'
+    try:
+      return (
+          indexing.index_of(self.from_atom_key, atom_key),
+          indexing.index_of(self.dest_atom_key, atom_key),
       )
-    if np.any(dest_atom_missing):
-      raise ValueError(
-          f'No atoms for dest_atom_key {self.dest_atom_key[dest_atom_missing]}'
-      )
-    sort_indices = np.argsort(atom_key)
-    from_indices_sorted = np.searchsorted(
-        atom_key, self.from_atom_key, sorter=sort_indices
-    )
-    dest_indices_sorted = np.searchsorted(
-        atom_key, self.dest_atom_key, sorter=sort_indices
-    )
-    from_indices = sort_indices[from_indices_sorted]
-    dest_indices = sort_indices[dest_indices_sorted]
-    return from_indices, dest_indices
+    except IndexError as e:
+      raise ValueError('Bond atom key missing from atom_key.') from e
 
   def restrict_to_atoms(self, atom_key: np.ndarray) -> Self:
+    """Returns a Bonds table retaining only bonds with both atoms in atom_key."""
     if not self.size:  # Early-out for empty table.
       return self
-    from_atom_mask = np.isin(self.from_atom_key, atom_key)
-    dest_atom_mask = np.isin(self.dest_atom_key, atom_key)
-    mask = np.logical_and(from_atom_mask, dest_atom_mask)
-    return typing.cast(Bonds, self.filter(mask=mask))
+    if not atom_key.size:
+      return self._take(np.empty((0,), dtype=np.int64))
+    # Evaluate both bond endpoints in one `(2, num_bonds)` membership pass.
+    endpoints = np.stack((self.from_atom_key, self.dest_atom_key), axis=0)
+    return self.apply_array(membership.isin(endpoints, atom_key).all(axis=0))
+
+  def split_by_atom_ranges(
+      self,
+      *,
+      atom_key: np.ndarray,
+      atom_ends: np.ndarray,
+  ) -> list[Self]:
+    """Partitions intra-range bonds across contiguous prefix atom ranges.
+
+    Args:
+      atom_key: 1D signed-integer array of atom keys.
+      atom_ends: 1D non-decreasing integer array of exclusive end indices in
+        `atom_key`; range `i` spans `[0 if i == 0 else atom_ends[i - 1],
+        atom_ends[i])`.
+
+    Returns:
+      A list of `Bonds` tables of length `atom_ends.size`, one per range,
+      omitting inter-range bonds and bonds outside `[0, atom_ends[-1])`.
+
+    Raises:
+      ValueError: If `atom_key` is not a 1D signed-integer array, `atom_ends` is
+        not a 1D non-decreasing integer array within `[0, atom_key.size]`, or
+        any bond endpoint key is missing from `atom_key`.
+    """
+    if atom_key.ndim != 1 or not np.issubdtype(
+        atom_key.dtype, np.signedinteger
+    ):
+      raise ValueError('atom_key must be a 1D signed-integer array.')
+    _validate_atom_ends(atom_ends, max_end=atom_key.size)
+    num_ranges = atom_ends.size
+    if self.size == 0:
+      return [self] * num_ranges
+    from_pos, dest_pos = self.get_atom_indices(atom_key)
+    if num_ranges == 0:
+      return []
+    atom_ends = atom_ends.astype(np.int64, copy=False)
+    from_range = np.searchsorted(atom_ends, from_pos, side='right')
+    dest_range = np.searchsorted(atom_ends, dest_pos, side='right')
+    same_range = np.flatnonzero(
+        (from_range == dest_range) & (from_range < num_ranges)
+    )
+    result = [self.slice_range(start=0, end=0)] * num_ranges
+    if same_range.size == 0:
+      return result
+
+    ranges = from_range[same_range]
+    if ranges.size > 1 and np.any(ranges[1:] < ranges[:-1]):
+      order = np.argsort(ranges, kind='stable')
+      ranges = ranges[order]
+      same_range = same_range[order]
+
+    splits = np.flatnonzero(ranges[1:] != ranges[:-1]) + 1
+    for start_pos, end_pos in zip(
+        (0, *splits), (*splits, ranges.size), strict=True
+    ):
+      rows = same_range[start_pos:end_pos]
+      start, end = int(rows[0]), int(rows[-1]) + 1
+      result[int(ranges[start_pos])] = (
+          self.slice_range(start=start, end=end)
+          if end - start == rows.size
+          else self._take(rows)
+      )
+    return result
 
   def to_mmcif_dict_from_atom_arrays(
       self,
@@ -154,7 +236,7 @@ class Bonds(table.Table):
       cif['_struct_conn.pdbx_role'].append(bond_row['role'])
       cif['_struct_conn.conn_type_id'].append(bond_type)
 
-    bond_types = np.unique(self.type)
+    bond_types = np.unique(self.type).tolist()
     cif['_struct_conn_type.id'] = bond_types
     unknown = ['?'] * len(bond_types)
     cif['_struct_conn_type.criteria'] = unknown

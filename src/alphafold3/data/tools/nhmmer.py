@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -15,7 +24,6 @@ from concurrent import futures
 import heapq
 import os
 import pathlib
-import shutil
 import tempfile
 import time
 from typing import Final
@@ -54,7 +62,7 @@ class Nhmmer(msa_tool.MsaTool):
 
     NOTE: The MSA obtained by running against sharded dbs won't be always
     exactly the same as the MSA obtained by running against an unsharded db.
-    This is because of Jackhmmer deduplication logic, which won't spot duplicate
+    This is because of Nhmmer deduplication logic, which won't spot duplicate
     hits across multiple shards. Usually this means that the sharded search
     finds more hits (likely bounded by the number of shards), but this should
     not pose an issue given how the results are used downstream. The problem is
@@ -147,31 +155,31 @@ class Nhmmer(msa_tool.MsaTool):
           else f'{target_sequence[:16]}... (len {len(target_sequence)})',
       )
 
-      global_temp_dir = tempfile.mkdtemp()
+      with tempfile.TemporaryDirectory() as global_temp_dir:
 
-      def _query_shard_fn(
-          shard_path: str,
-      ) -> tuple[msa_tool.MsaToolResult, float]:
-        t_start = time.time()
-        # Get tblout as it contains e-values we need for merging sequences.
-        result = self._query_db_shard(
-            target_sequence=target_sequence,
-            db_shard_path=shard_path,
-            get_tblout=True,  # Tblout contains e-values needed for merging.
-            global_temp_dir=global_temp_dir,
-        )
-        return result, time.time() - t_start
+        def _query_shard_fn(
+            shard_path: str,
+        ) -> tuple[msa_tool.MsaToolResult, float]:
+          t_start = time.time()
+          # Get tblout as it contains e-values we need for merging sequences.
+          result = self._query_db_shard(
+              target_sequence=target_sequence,
+              db_shard_path=shard_path,
+              get_tblout=True,  # Tblout contains e-values needed for merging.
+              global_temp_dir=global_temp_dir,
+          )
+          return result, time.time() - t_start
 
-      with futures.ThreadPoolExecutor(max_workers=self._max_threads) as ex:
-        tool_outputs, timings = zip(*ex.map(_query_shard_fn, self._shard_paths))
+        with futures.ThreadPoolExecutor(max_workers=self._max_threads) as ex:
+          tool_outputs, timings = zip(
+              *ex.map(_query_shard_fn, self._shard_paths)
+          )
 
       logging.info(
           'Finished query for %d shards, shard timings (seconds): %s',
           len(tool_outputs),
           ', '.join(f'{t:.1f}' for t in timings),
       )
-
-      shutil.rmtree(global_temp_dir, ignore_errors=True)
       return _merge_nhmmer_results(tool_outputs, self._max_sequences)
 
     else:
@@ -300,10 +308,12 @@ def _merge_nhmmer_results(
   assert len(set(nh_res.target_sequence for nh_res in nhmmer_results)) == 1
   assert len(set(nh_res.e_value for nh_res in nhmmer_results)) == 1
 
-  # Parse the TBL output, create a mapping from unique hit ID to TBL line.
-  parsed_tbl = {}
-  for nhmmer_result in nhmmer_results:
+  # Create an iterator and merge a3m info with tbl info per shard.
+  def _merged_a3m_tbl_iter(
+      nhmmer_result: msa_tool.MsaToolResult,
+  ) -> Iterable[tuple[str, str, str, str]]:
     assert nhmmer_result.tblout is not None
+    parsed_tbl = {}
     for line in nhmmer_result.tblout.splitlines():
       if not line.startswith('#'):
         line_fields = line.split(maxsplit=15)
@@ -314,10 +324,8 @@ def _merge_nhmmer_results(
         unique_id = f'{accession}/{alignment_from}-{alignment_to}'
         parsed_tbl[unique_id] = line
 
-  # Create an iterator and merge a3m info with tbl info.
-  def _merged_a3m_tbl_iter(a3m: str) -> Iterable[tuple[str, str, str, str]]:
     # Don't parse the entire a3m, lazily parse only as many sequences as needed.
-    iterator = iter(parsers.lazy_parse_fasta_string(a3m))
+    iterator = iter(parsers.lazy_parse_fasta_string(nhmmer_result.a3m))
     next(iterator)  # Skip the query which isn't present in tblout.
     for sequence, description in iterator:
       name = description.partition(' ')[0]
@@ -325,16 +333,18 @@ def _merge_nhmmer_results(
         # Skip sequences for which we don't have tbl information.
         yield sequence, description, tbl_info, name
 
-  def sort_key(seq_data: tuple[str, str, str, str]) -> tuple[float, str]:
+  def sort_key(seq_data: tuple[str, str, str, str]) -> tuple[float, float, str]:
     unused_seq, unused_description, tbl_info, name = seq_data
     # Nucleic tblout has 16 space delimited columns. "-" used if no value
-    # present. We want e-value in column 12, so do only 13 splits. Use the name
-    # in case of an e-value tie.
-    return float(tbl_info.split(maxsplit=13)[12]), name
+    # present. We want e-value (column 13) and bit score (column 14), so do only
+    # 14 splits. E-value and bit score are equivalent, but bit score might have
+    # higher resolution. Use the name in case of a tie.
+    e_value, bit_score = tbl_info.split(maxsplit=14)[12:14]
+    return float(e_value), -float(bit_score), name
 
   # A3M/TBL is sorted by e-value and name, hence we can merge them efficiently.
   merged_a3m_and_tblout = heapq.merge(
-      *[_merged_a3m_tbl_iter(res.a3m) for res in nhmmer_results],
+      *[_merged_a3m_tbl_iter(res) for res in nhmmer_results],
       key=sort_key,
   )
 

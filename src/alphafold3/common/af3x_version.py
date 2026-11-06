@@ -21,7 +21,7 @@ from alphafold3 import version
 from alphafold3.constants import chemical_components
 
 
-AF3_UPSTREAM_COMMIT = '87bd9e678d9acacc4aa9baa05e820f32b80e1b49'
+AF3_UPSTREAM_COMMIT = '78618da18df7caddc017e3f1ddfb7f876e8c764c'
 
 _PACKAGES = (
     'jax',

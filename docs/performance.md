@@ -92,13 +92,26 @@ hardware and take advantage of multi-core systems.
 
 Each genetic database with *n* sequences is split into *s* shards, each
 containing roughly *n* / *s* sequences. We recommend splitting the sequences
-between shards randomly to make sure each shard has similar sequence length
-distribution. This could be achieved using standard tools:
+between shards using `seqkit split2 --by-part <s>` to distribute sequences in
+round-robin order (`record_index % s`) in a single streaming pass. This ensures
+each shard has a similar sequence length distribution without requiring a
+separate `seqkit shuffle --two-pass` step:
 
-1.  Shuffle the sequences in the fasta. This can be done for example by running:
-    `seqkit shuffle --two-pass <db.fasta>`
-2.  Split the shuffled fasta in *s* shards. This can be done for example by
-    running: `seqkit split2 --by-part <s> <db.fasta>`
+```bash
+seqkit split2 --by-part <s> <db.fasta>
+```
+
+You can also use `scripts/shard_databases.sh`
+(`src/alphafold3/scripts/shard_databases.sh`) to shard all 7 genetic databases
+in parallel and rename the output parts to the required shard format:
+
+```bash
+./src/alphafold3/scripts/shard_databases.sh [<DB_SOURCE_DIR>] [<SHARDED_DIR>]
+```
+
+Note that `ulimit -n 65535` (or `--ulimit nofile=65535:65535` in Docker) should
+be set when splitting all databases concurrently so `seqkit` can hold all 1,436
+output shard files open simultaneously.
 
 Make sure the shards names follow this pattern:
 `prefix-<shard_index>-of-<total_shards>`, both `shard_index` and `total_shards`
@@ -116,8 +129,12 @@ shards should be:
 The file spec for these files is `uniprot.fasta@3`.
 
 Save the total number of sequences in the protein databases, and the total
-number of nucleic bases in the RNA databases – these will be needed later as a
-flag to Jackhmmer/Nhmmer to correctly scale e-values across all shards.
+number of megabases in the RNA databases – these will be needed later as a flag
+to Jackhmmer/Nhmmer to correctly scale e-values across all shards. The units
+differ between the two tools: Jackhmmer's `-Z` is a number of sequences (an
+integer), while Nhmmer's `-Z` is a database size in megabases (a float), so an
+RNA Z-value given in bases is a factor of a million too large and silently
+shrinks the MSA.
 
 Save the sharded databases on a fast SSD or in a RAM-backed filesystem, then
 launch AlphaFold with the sharded paths instead of normal paths and set the
@@ -140,7 +157,7 @@ python run_alphafold.py \
     --rfam_database_path="rfam_14_9_clust_seq_id_90_cov_80_rep_seq.fasta@16" \
     --rfam_z_value=138.115553 \
     --rna_central_database_path="rnacentral_active_seq_id_90_cov_80_linclust.fasta@64" \
-    --rna_central_z_value=13271.415730
+    --rna_central_z_value=13271.415730 \
     --jackhmmer_n_cpu=2 \
     --jackhmmer_max_parallel_shards=16 \
     --nhmmer_n_cpu=2 \
@@ -349,7 +366,29 @@ ENV XLA_CLIENT_MEM_FRACTION=3.2
 You may also want to make use of the JAX persistent compilation cache, to avoid
 unnecessary recompilation of the model between runs. You can enable the
 compilation cache with the `--jax_compilation_cache_dir <YOUR_DIRECTORY>` flag
-in `run_alphafold.py`.
+in `run_alphafold.py`. Compilation dominates the runtime of a single fold job,
+so this has a large effect, especially for small inputs.
+
+For example, run times on a 152-residue protein chain are as follows:
+
+Without `--jax_compilation_cache_dir`:
+
+Run        | Total time | Inference time
+:--------- | ---------: | -------------:
+First run  | 148 s      | 127 s
+Second run | 143 s      | 125 s
+
+With `--jax_compilation_cache_dir`:
+
+Run                         | Total time | Inference time
+:-------------------------- | ---------: | -------------:
+First run (populates cache) | 148 s      | 127 s
+Second run (warm cache)     | 32 s       | 15 s
+
+The cache also makes repeated runs reproducible. Without it, two processes given
+the same input and seed may produce different structures, because each process
+compiles independently and can select different kernels. With a populated cache,
+repeated runs of the same input and seed produced bit-identical coordinates.
 
 More detailed instructions are available in the
 [JAX documentation](https://jax.readthedocs.io/en/latest/persistent_compilation_cache.html#persistent-compilation-cache),

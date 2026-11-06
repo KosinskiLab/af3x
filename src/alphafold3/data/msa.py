@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -16,8 +25,8 @@ from typing import Self
 
 from absl import logging
 from alphafold3.constants import mmcif_names
+from alphafold3.cpp import msa_features
 from alphafold3.data import msa_config
-from alphafold3.data import msa_features
 from alphafold3.data import parsers
 from alphafold3.data.tools import jackhmmer
 from alphafold3.data.tools import msa_tool
@@ -26,7 +35,7 @@ import numpy as np
 
 
 class Error(Exception):
-  """Error indicatating a problem with MSA Search."""
+  """Error indicating a problem with MSA Search."""
 
 
 def _featurize(seq: str, chain_poly_type: str) -> str | list[int]:
@@ -188,7 +197,7 @@ class Msa:
       all_descriptions.extend(descriptions)
 
     return cls(
-        query_sequence=query_sequence,
+        query_sequence=query_sequence,  # pyrefly: ignore[bad-argument-type]
         chain_poly_type=chain_poly_type,
         sequences=all_sequences,
         descriptions=all_descriptions,
@@ -298,7 +307,9 @@ def get_msa_tool(
           n_iter=msa_tool_config.n_iter,
           e_value=msa_tool_config.e_value,
           z_value=msa_tool_config.z_value,
+          dom_z_value=msa_tool_config.dom_z_value,
           max_sequences=msa_tool_config.max_sequences,
+          max_threads=msa_tool_config.max_parallel_shards,
       )
     case msa_config.NhmmerConfig():
       return nhmmer.Nhmmer(
@@ -308,8 +319,10 @@ def get_msa_tool(
           database_path=msa_tool_config.database_config.path,
           n_cpu=msa_tool_config.n_cpu,
           e_value=msa_tool_config.e_value,
+          z_value=msa_tool_config.z_value,
           max_sequences=msa_tool_config.max_sequences,
           alphabet=msa_tool_config.alphabet,
+          max_threads=msa_tool_config.max_parallel_shards,
       )
     case _:
       raise ValueError(f'Unknown MSA tool: {msa_tool_config}.')

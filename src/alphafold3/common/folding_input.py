@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -17,12 +26,10 @@ import itertools
 import json
 import logging
 import lzma
-import os
-import pathlib
 import random
 import re
 import string
-from typing import Any, Final, Self, TypeAlias, cast
+from typing import Any, BinaryIO, Final, Self, TypeAlias, cast
 
 from alphafold3 import structure
 from alphafold3.constants import chemical_components
@@ -30,11 +37,13 @@ from alphafold3.constants import mmcif_names
 from alphafold3.constants import residue_names
 from alphafold3.cpp import cif_dict
 from alphafold3.structure import mmcif as mmcif_lib
+from etils import epath
 import rdkit.Chem as rd_chem
 import zstandard as zstd
 
 from alphafold3.crosslinks import crosslink_definitions
 from alphafold3.crosslinks import utils as xutils
+
 
 BondAtomId: TypeAlias = tuple[str, int, str]
 
@@ -52,35 +61,40 @@ def _validate_keys(actual: Collection[str], expected: Collection[str]):
     raise ValueError(f'Unexpected JSON keys in: {", ".join(sorted(bad_keys))}')
 
 
-def _read_file(path: pathlib.Path, json_path: pathlib.Path | None) -> str:
+def _read_file(
+    *,
+    path: epath.PathLike,
+    json_path: epath.PathLike | None,
+) -> str:
   """Reads a maybe compressed (gzip, xz, zstd) file from the given path.
 
   Args:
     path: The path to the file to read. This can be either absolute path, or a
-      path relative to the JSON file path.
+      path relative to the JSON file.
     json_path: The path to the JSON file. If None, the path must be absolute.
 
   Returns:
     The contents of the file.
   """
+  path = epath.Path(path)
   if not path.is_absolute():
     if json_path is None:
       raise ValueError('json_path must be specified if path is not absolute.')
-    path = (json_path.parent / path).resolve()
+    path = (epath.Path(json_path).parent / path).resolve()
 
-  with open(path, 'rb') as f:
+  with path.open('rb') as f:
     first_six_bytes = f.read(6)
     f.seek(0)
 
     # Detect the compression type using the magic number in the header.
     if first_six_bytes[:2] == b'\x1f\x8b':
-      with gzip.open(f, 'rt') as gzip_f:
+      with gzip.open(cast(BinaryIO, f), 'rt') as gzip_f:
         return cast(str, gzip_f.read())
     elif first_six_bytes == b'\xfd\x37\x7a\x58\x5a\x00':
-      with lzma.open(f, 'rt') as xz_f:
+      with lzma.open(cast(BinaryIO, f), 'rt') as xz_f:
         return cast(str, xz_f.read())
     elif first_six_bytes[:4] == b'\x28\xb5\x2f\xfd':
-      with zstd.open(f, 'rt') as zstd_f:
+      with zstd.open(cast(BinaryIO, f), 'rt') as zstd_f:
         return cast(str, zstd_f.read())
     else:
       return f.read().decode('utf-8')
@@ -100,9 +114,24 @@ class Template:
       query_to_template_map: A mapping from query residue index to template
         residue index.
     """
+    if not mmcif:
+      raise ValueError('The template mmCIF must be a non-empty string.')
+
     self._mmcif = mmcif
     # Needed to make the Template class hashable.
     self._query_to_template = tuple(query_to_template_map.items())
+
+    for pos, (query_index, hit_index) in enumerate(
+        query_to_template_map.items(), start=1
+    ):
+      if query_index < 0:
+        raise ValueError(
+            f'Query residue index {query_index} at position {pos} is negative.'
+        )
+      if hit_index < 0:
+        raise ValueError(
+            f'Template residue index {hit_index} at position {pos} is negative.'
+        )
 
   @property
   def query_to_template_map(self) -> Mapping[int, int]:
@@ -115,12 +144,57 @@ class Template:
   def __hash__(self) -> int:
     return hash((self._mmcif, tuple(sorted(self._query_to_template))))
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, Template):
+      return NotImplemented
     mmcifs_equal = self._mmcif == other._mmcif
     maps_equal = sorted(self._query_to_template) == sorted(
         other._query_to_template
     )
     return mmcifs_equal and maps_equal
+
+  @classmethod
+  def from_dict(
+      cls,
+      json_dict: Mapping[str, Any],
+      json_path: epath.PathLike | None = None,
+  ) -> Self:
+    """Constructs Template from the AlphaFold JSON dict.
+
+    Args:
+      json_dict: JSON dict representing the template, must have keys 'mmcif' or
+        'mmcifPath', 'queryIndices', and 'templateIndices'.
+      json_path: The path to the JSON file, used to resolve paths inside that
+        are relative to it.
+    """
+    _validate_keys(
+        json_dict.keys(),
+        {'mmcif', 'mmcifPath', 'queryIndices', 'templateIndices'},
+    )
+    mmcif = json_dict.get('mmcif', None)
+    mmcif_path = json_dict.get('mmcifPath', None)
+    if mmcif and mmcif_path:
+      raise ValueError('Only one of mmcif/mmcifPath can be set.')
+    if mmcif and len(mmcif) < 256 and epath.Path(mmcif).exists():
+      raise ValueError('Set the template path using the "mmcifPath" field.')
+    if mmcif_path:
+      mmcif = _read_file(path=mmcif_path, json_path=json_path)
+    query_to_template_map = dict(
+        zip(
+            json_dict['queryIndices'],
+            json_dict['templateIndices'] or [],  # AlphaFold < 3.0.4 used None.
+            strict=True,
+        )
+    )
+    return cls(mmcif=mmcif, query_to_template_map=query_to_template_map)
+
+  def to_dict(self) -> Mapping[str, Any]:
+    """Converts Template to an AlphaFold JSON dict."""
+    return {
+        'mmcif': self._mmcif,
+        'queryIndices': [m[0] for m in self._query_to_template],
+        'templateIndices': [m[1] for m in self._query_to_template],
+    }
 
 
 class ProteinChain:
@@ -169,14 +243,28 @@ class ProteinChain:
         field is unset and must be filled in by the data pipeline before
         featurisation. The list can be empty or contain up to 20 templates.
     """
-    if not all(res.isalpha() for res in sequence):
-      raise ValueError(f'Protein must contain only letters, got "{sequence}"')
+    if not re.fullmatch(r'[A-Z]*', sequence):
+      raise ValueError(
+          f'Protein must contain only upper case letters, got "{sequence}"'
+      )
     if any(not 0 < mod[1] <= len(sequence) for mod in ptms):
       raise ValueError(f'Invalid protein modification index: {ptms}')
     if any(mod[0].startswith('CCD_') for mod in ptms):
       raise ValueError(
           f'Protein ptms must not contain the "CCD_" prefix, got {ptms}'
       )
+
+    for template_pos, template in enumerate(templates or [], start=1):
+      for pos, query_index in enumerate(
+          template.query_to_template_map.keys(), start=1
+      ):
+        if query_index >= len(sequence):
+          raise ValueError(
+              f'Query residue index {query_index} at position {pos} is out of'
+              f' range for the query sequence of length {len(sequence)} for'
+              f' template {template_pos}.'
+          )
+
     # Use hashable containers for ptms and templates.
     self._id = id
     self._sequence = sequence
@@ -224,7 +312,9 @@ class ProteinChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, ProteinChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
@@ -301,7 +391,7 @@ class ProteinChain:
   def from_dict(
       cls,
       json_dict: Mapping[str, Any],
-      json_path: pathlib.Path | None = None,
+      json_path: epath.PathLike | None = None,
       seq_id: str | None = None,
   ) -> Self:
     """Constructs ProteinChain from the AlphaFold JSON dict."""
@@ -334,50 +424,35 @@ class ProteinChain:
     if (
         unpaired_msa
         and len(unpaired_msa) < 256
-        and os.path.exists(unpaired_msa)
+        and epath.Path(unpaired_msa).exists()
     ):
       raise ValueError(
           'Set the unpaired MSA path using the "unpairedMsaPath" field.'
       )
     elif unpaired_msa_path:
-      unpaired_msa = _read_file(pathlib.Path(unpaired_msa_path), json_path)
+      unpaired_msa = _read_file(path=unpaired_msa_path, json_path=json_path)
 
     paired_msa = json_dict.get('pairedMsa', None)
     paired_msa_path = json_dict.get('pairedMsaPath', None)
     if paired_msa and paired_msa_path:
       raise ValueError('Only one of pairedMsa/pairedMsaPath can be set.')
-    if paired_msa and len(paired_msa) < 256 and os.path.exists(paired_msa):
+    if paired_msa and len(paired_msa) < 256 and epath.Path(paired_msa).exists():
       raise ValueError(
           'Set the paired MSA path using the "pairedMsaPath" field.'
       )
     elif paired_msa_path:
-      paired_msa = _read_file(pathlib.Path(paired_msa_path), json_path)
+      paired_msa = _read_file(path=paired_msa_path, json_path=json_path)
 
     raw_templates = json_dict.get('templates', None)
 
     if raw_templates is None:
       templates = None
     else:
+      if not isinstance(raw_templates, list):
+        raise ValueError(f'Templates must be a list, got {type(raw_templates)}')
       templates = []
       for raw_template in raw_templates:
-        _validate_keys(
-            raw_template.keys(),
-            {'mmcif', 'mmcifPath', 'queryIndices', 'templateIndices'},
-        )
-        mmcif = raw_template.get('mmcif', None)
-        mmcif_path = raw_template.get('mmcifPath', None)
-        if mmcif and mmcif_path:
-          raise ValueError('Only one of mmcif/mmcifPath can be set.')
-        if mmcif and len(mmcif) < 256 and os.path.exists(mmcif):
-          raise ValueError('Set the template path using the "mmcifPath" field.')
-        if mmcif_path:
-          mmcif = _read_file(pathlib.Path(mmcif_path), json_path)
-        query_to_template_map = dict(
-            zip(raw_template['queryIndices'], raw_template['templateIndices'])
-        )
-        templates.append(
-            Template(mmcif=mmcif, query_to_template_map=query_to_template_map)
-        )
+        templates.append(Template.from_dict(raw_template, json_path=json_path))
 
     return cls(
         id=seq_id or json_dict['id'],
@@ -396,16 +471,7 @@ class ProteinChain:
     if self._templates is None:
       templates = None
     else:
-      templates = [
-          {
-              'mmcif': template.mmcif,
-              'queryIndices': list(template.query_to_template_map.keys()),
-              'templateIndices': (
-                  list(template.query_to_template_map.values()) or None
-              ),
-          }
-          for template in self._templates
-      ]
+      templates = [t.to_dict() for t in self._templates]
     contents = {
         'id': seq_id or self._id,
         'sequence': self._sequence,
@@ -430,10 +496,10 @@ class ProteinChain:
       ccd_coded_seq[ptm_index - 1] = ptm_code
     return ccd_coded_seq
 
-  def fill_missing_fields(self) -> Self:
+  def fill_missing_fields(self) -> 'ProteinChain':
     """Fill missing MSA and template fields with default values."""
     return ProteinChain(
-        id=self.id,
+        id=self._id,
         sequence=self._sequence,
         ptms=self._ptms,
         description=self._description,
@@ -477,8 +543,10 @@ class RnaChain:
         featurisation. If set to an empty string, it will be treated as a custom
         MSA with no sequences.
     """
-    if not all(res.isalpha() for res in sequence):
-      raise ValueError(f'RNA must contain only letters, got "{sequence}"')
+    if not re.fullmatch(r'[A-Z]*', sequence):
+      raise ValueError(
+          f'RNA must contain only upper case letters, got "{sequence}"'
+      )
     if any(not 0 < mod[1] <= len(sequence) for mod in modifications):
       raise ValueError(f'Invalid RNA modification index: {modifications}')
     if any(mod[0].startswith('CCD_') for mod in modifications):
@@ -523,7 +591,9 @@ class RnaChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, RnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
@@ -567,7 +637,7 @@ class RnaChain:
   def from_dict(
       cls,
       json_dict: Mapping[str, Any],
-      json_path: pathlib.Path | None = None,
+      json_path: epath.PathLike | None = None,
       seq_id: str | None = None,
   ) -> Self:
     """Constructs RnaChain from the AlphaFold JSON dict."""
@@ -596,13 +666,13 @@ class RnaChain:
     if (
         unpaired_msa
         and len(unpaired_msa) < 256
-        and os.path.exists(unpaired_msa)
+        and epath.Path(unpaired_msa).exists()
     ):
       raise ValueError(
           'Set the unpaired MSA path using the "unpairedMsaPath" field.'
       )
     elif unpaired_msa_path:
-      unpaired_msa = _read_file(pathlib.Path(unpaired_msa_path), json_path)
+      unpaired_msa = _read_file(path=unpaired_msa_path, json_path=json_path)
 
     return cls(
         id=seq_id or json_dict['id'],
@@ -639,12 +709,13 @@ class RnaChain:
       ccd_coded_seq[modification_index - 1] = ccd_code
     return ccd_coded_seq
 
-  def fill_missing_fields(self) -> Self:
+  def fill_missing_fields(self) -> 'RnaChain':
     """Fill missing MSA fields with default values."""
     return RnaChain(
-        id=self.id,
-        sequence=self.sequence,
-        modifications=self.modifications,
+        id=self._id,
+        sequence=self._sequence,
+        modifications=self._modifications,
+        description=self._description,
         unpaired_msa=self._unpaired_msa or '',
     )
 
@@ -671,8 +742,10 @@ class DnaChain:
         (1-based) residue index where the modification is applied.
       description: An optional textual description of the DNA chain.
     """
-    if not all(res.isalpha() for res in sequence):
-      raise ValueError(f'DNA must contain only letters, got "{sequence}"')
+    if not re.fullmatch(r'[A-Z]*', sequence):
+      raise ValueError(
+          f'DNA must contain only upper case letters, got "{sequence}"'
+      )
     if any(not 0 < mod[1] <= len(sequence) for mod in modifications):
       raise ValueError(f'Invalid DNA modification index: {modifications}')
     if any(mod[0].startswith('CCD_') for mod in modifications):
@@ -702,13 +775,19 @@ class DnaChain:
     ])
 
   @property
+  def modifications(self) -> Sequence[tuple[str, int]]:
+    return self._modifications
+
+  @property
   def description(self) -> str | None:
     return self._description
 
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, DnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
@@ -720,9 +799,6 @@ class DnaChain:
     return hash(
         (self._id, self._sequence, self._modifications, self._description)
     )
-
-  def modifications(self) -> Sequence[tuple[str, int]]:
-    return self._modifications
 
   def hash_without_id(self) -> int:
     """Returns a hash ignoring the ID - useful for deduplication."""
@@ -970,6 +1046,11 @@ class Input:
     if not self.rng_seeds:
       raise ValueError('Input must have at least one RNG seed.')
 
+    if any(seed < 0 or seed > 2**32 - 1 for seed in self.rng_seeds):
+      raise ValueError(
+          f'RNG seeds must be 32-bit unsigned integers, got {self.rng_seeds}'
+      )
+
     if not self.name.strip() or not self.sanitised_name():
       raise ValueError(
           'Input name must be non-empty and contain at least one valid'
@@ -977,7 +1058,7 @@ class Input:
       )
 
     chain_ids = [c.id for c in self.chains]
-    if any(not c.id.isalpha() or c.id.islower() for c in self.chains):
+    if any(not re.fullmatch(r'[A-Z]+', c.id) for c in self.chains):
       raise ValueError(f'IDs must be upper case letters, got: {chain_ids}')
     if len(set(chain_ids)) != len(chain_ids):
       raise ValueError('Input JSON contains sequences with duplicate IDs.')
@@ -1116,7 +1197,7 @@ class Input:
 
   @classmethod
   def from_json(
-      cls, json_str: str, json_path: pathlib.Path | None = None
+      cls, json_str: str, json_path: epath.PathLike | None = None
   ) -> Self:
     """Loads the input from the AlphaFold JSON string."""
     raw_json = json.loads(json_str)
@@ -1254,10 +1335,10 @@ class Input:
     user_ccd_path = raw_json.get('userCCDPath')
     if user_ccd and user_ccd_path:
       raise ValueError('Only one of userCCD/userCCDPath can be set.')
-    if user_ccd and len(user_ccd) < 256 and os.path.exists(user_ccd):
+    if user_ccd and len(user_ccd) < 256 and epath.Path(user_ccd).exists():
       raise ValueError('Set the user CCD path using the "userCCDPath" field.')
     elif user_ccd_path:
-      user_ccd = _read_file(pathlib.Path(user_ccd_path), json_path)
+      user_ccd = _read_file(path=user_ccd_path, json_path=json_path)
 
     return cls(
         name=raw_json['name'],
@@ -1454,31 +1535,31 @@ class Input:
 
   def to_json(self) -> str:
     """Converts Input to an AlphaFold JSON."""
-    deduped_chains = {}
-    deduped_chain_ids = {}
-    for chain in self.chains:
-      deduped_chains[chain.hash_without_id()] = chain
-      deduped_chain_ids.setdefault(chain.hash_without_id(), []).append(chain.id)
-
+    # Group only consecutive identical chains to preserve chain order on a JSON
+    # round-trip (chain order determines token order and mmCIF ID assignment).
     sequences = []
-    for chain_content_hash, ids in deduped_chain_ids.items():
-      chain = deduped_chains[chain_content_hash]
-      sequences.append(chain.to_dict(seq_id=ids if len(ids) > 1 else ids[0]))
+    for _, group in itertools.groupby(
+        self.chains, key=lambda c: c.hash_without_id()
+    ):
+      chains = list(group)
+      seq_id = [c.id for c in chains] if len(chains) > 1 else chains[0].id
+      sequences.append(chains[0].to_dict(seq_id=seq_id))
 
-    alphafold_json = json.dumps(
-        {
-            'dialect': JSON_DIALECT,
-            'version': JSON_VERSION,
-            'name': self.name,
-            'sequences': sequences,
-            'modelSeeds': self.rng_seeds,
-            'bondedAtomPairs': self.bonded_atom_pairs,
-            'userCCD': self.user_ccd,
-            'crosslinks': self.crosslinks,
-            'disulfide_bonds': self.disulfide_bonds,
-        },
-        indent=2,
-    )
+    json_dict = {
+        'dialect': JSON_DIALECT,
+        'version': JSON_VERSION,
+        'name': self.name,
+        'sequences': sequences,
+        'modelSeeds': self.rng_seeds,
+        'bondedAtomPairs': self.bonded_atom_pairs,
+        'userCCD': self.user_ccd,
+    }
+    # AF3x keys only when set, so XL-free inputs serialise as upstream AF3.
+    if self.crosslinks:
+      json_dict['crosslinks'] = self.crosslinks
+    if self.disulfide_bonds:
+      json_dict['disulfide_bonds'] = self.disulfide_bonds
+    alphafold_json = json.dumps(json_dict, indent=2)
     # Remove newlines from the query/template indices arrays. We match the
     # queryIndices/templatesIndices with a non-capturing group. We then match
     # the entire region between the square brackets by looking for lines
@@ -1711,10 +1792,10 @@ class Input:
     
     return sampled_inputs
 
-def load_fold_inputs_from_path(json_path: pathlib.Path) -> Iterator[Input]:
+def load_fold_inputs_from_path(json_path: epath.PathLike) -> Iterator[Input]:
   """Loads multiple fold inputs from a JSON string."""
-  with open(json_path, 'r') as f:
-    json_str = f.read()
+  json_path = epath.Path(json_path)
+  json_str = json_path.read_text()
 
   # Parse the JSON string, so we can detect its format.
   raw_json = json.loads(json_str)
@@ -1739,7 +1820,8 @@ def load_fold_inputs_from_path(json_path: pathlib.Path) -> Iterator[Input]:
           f'Failed to load input from {json_path} (AlphaFold 3 dialect): {e}'
       ) from e
 
-def load_fold_inputs_from_dir(input_dir: pathlib.Path) -> Iterator[Input]:
+
+def load_fold_inputs_from_dir(input_dir: epath.PathLike) -> Iterator[Input]:
   """Loads multiple fold inputs from all JSON files in a given input_dir.
 
   Args:
@@ -1748,6 +1830,7 @@ def load_fold_inputs_from_dir(input_dir: pathlib.Path) -> Iterator[Input]:
   Yields:
     The fold inputs from all JSON files in the input directory.
   """
+  input_dir = epath.Path(input_dir)
   for file_path in sorted(input_dir.glob('*.json')):
     if not file_path.is_file():
       continue

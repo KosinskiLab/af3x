@@ -10,6 +10,7 @@ build/
 
 # Generated build data
 src/alphafold3/constants/converters/*.pickle
+src/alphafold3/constants/converters/*.msgpack
 
 # IDE
 .idea/

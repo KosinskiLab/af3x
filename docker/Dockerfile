@@ -1,14 +1,23 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
 
-FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+FROM nvidia/cuda:12.9.2-base-ubuntu24.04
 
 # Some RUN statements are combined together to make Docker build run faster.
 # Get latest package listing, install python, git, wget, compilers and libs.
@@ -22,7 +31,7 @@ apt-get update --quiet \
 
 # Install uv from the official repository. The version is pinned for
 # reproducibility.
-COPY --from=ghcr.io/astral-sh/uv:0.9.24 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 
 # UV_COMPILE_BYTECODE=1 speeds up future container starts.
 # UV_PROJECT_ENVIRONMENT explicitly sets the virtual environment location.
@@ -46,9 +55,11 @@ RUN mkdir /hmmer_build /hmmer ; \
     (cd /hmmer_build && echo "ca70d94fd0cf271bd7063423aabb116d42de533117343a9b27a65c17ff06fbf3 hmmer-3.4.tar.gz" | sha256sum --check) && \
     (cd /hmmer_build && tar zxf hmmer-3.4.tar.gz && rm hmmer-3.4.tar.gz)
 
-# Apply the --seq_limit patch to HMMER.
-COPY docker/jackhmmer_seq_limit.patch /hmmer_build/
-RUN (cd /hmmer_build && patch -p0 < jackhmmer_seq_limit.patch)
+# Apply speedup patches to EASEL and HMMER.
+COPY docker/*.patch /hmmer_build/
+RUN (cd /hmmer_build && patch -p0 < jackhmmer_seq_limit.patch) && \
+    (cd /hmmer_build && patch -p0 < easel_fast_fasta_parsing.patch) && \
+    (cd /hmmer_build && patch -p0 < jackhmmer_parallel_fasta.patch)
 
 # Build HMMER.
 RUN (cd /hmmer_build/hmmer-3.4 && ./configure --prefix /hmmer) && \
@@ -68,8 +79,9 @@ WORKDIR /app/alphafold
 # --no-editable: install as a static package.
 # If using this as a recipe for local installation, we recommend removing the
 # --frozen and --no-editable flags.
-RUN --mount=type=cache,target=/root/.cache/uv \ 
-    UV_LINK_MODE=copy uv sync --frozen --all-groups --no-editable
+ARG UV_EXTRAS=""
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_LINK_MODE=copy uv sync --frozen --all-groups --no-editable $UV_EXTRAS
 
 # Build chemical components database (this binary was installed by uv sync).
 RUN uv run build_data

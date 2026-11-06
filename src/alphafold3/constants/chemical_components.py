@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -16,22 +25,21 @@ import functools
 import os
 
 from alphafold3.common import resources
-from alphafold3.common import safe_pickle
 from alphafold3.cpp import cif_dict
+import msgpack
 
-
-_CCD_PICKLE_FILE = resources.filename(
-    resources.ROOT / 'constants/converters/ccd.pickle'
+_CCD_MSGPACK_FILE = resources.filename(
+    resources.ROOT / 'constants/converters/ccd.msgpack'
 )
 
 
 @functools.cache
-def _load_ccd_pickle_cached(
+def _load_ccd_msgpack_cached(
     path: os.PathLike[str],
 ) -> dict[str, Mapping[str, Sequence[str]]]:
-  """Loads the CCD pickle file and caches it so that it is only loaded once."""
+  """Loads the CCD MessagePack file and caches it so it is only loaded once."""
   with open(path, 'rb') as f:
-    return safe_pickle.load(f)
+    return msgpack.unpack(f)
 
 
 class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
@@ -43,25 +51,25 @@ class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
   Wraps the dict to prevent accidental mutation.
   """
 
-  __slots__ = ('_dict', '_ccd_pickle_path')
+  __slots__ = ('_dict', '_ccd_msgpack_path')
 
   def __init__(
       self,
-      ccd_pickle_path: os.PathLike[str] | None = None,
+      ccd_msgpack_path: os.PathLike[str] | None = None,
       user_ccd: str | None = None,
   ):
     """Initialises the chemical components dictionary.
 
     Args:
-      ccd_pickle_path: Path to the CCD pickle file. If None, uses the default
-        CCD pickle file included in the source code.
+      ccd_msgpack_path: Path to the CCD MessagePack file. If None, uses the
+        default CCD MessagePack file included in the source code.
       user_ccd: A string containing the user-provided CCD. This has to conform
         to the same format as the CCD, see https://www.wwpdb.org/data/ccd. If
         provided, takes precedence over the CCD for the the same key. This can
         be used to override specific entries in the CCD if desired.
     """
-    self._ccd_pickle_path = ccd_pickle_path or _CCD_PICKLE_FILE
-    self._dict = _load_ccd_pickle_cached(self._ccd_pickle_path)
+    self._ccd_msgpack_path = ccd_msgpack_path or _CCD_MSGPACK_FILE
+    base_ccd = _load_ccd_msgpack_cached(self._ccd_msgpack_path)
 
     if user_ccd is not None:
       if not user_ccd:
@@ -70,12 +78,18 @@ class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
           key: value.to_dict()
           for key, value in cif_dict.parse_multi_data_cif(user_ccd).items()
       }
-      self._dict.update(user_ccd_cifs)
+      # Create a copy of the base CCD with the user modifications so the
+      # base CCD is not mutated across different instances of the class.
+      self._dict = {**base_ccd, **user_ccd_cifs}
+    else:
+      self._dict = base_ccd
 
-  def __getitem__(self, key: str) -> Mapping[str, Sequence[str]]:
+  def __getitem__(self, key: object) -> Mapping[str, Sequence[str]]:
+    if not isinstance(key, str):
+      raise TypeError(f'The CCD key must be a string, got {type(key)}')
     return self._dict[key]
 
-  def __contains__(self, key: str) -> bool:
+  def __contains__(self, key: object) -> bool:
     return key in self._dict
 
   def __iter__(self) -> Iterator[str]:
@@ -87,7 +101,7 @@ class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
   def __hash__(self) -> int:
     return id(self)  # Ok since this is immutable.
 
-  def get(
+  def get(  # pyrefly: ignore[bad-override]
       self, key: str, default: None | Mapping[str, Sequence[str]] = None
   ) -> Mapping[str, Sequence[str]] | None:
     return self._dict.get(key, default)
@@ -104,7 +118,7 @@ class Ccd(Mapping[str, Mapping[str, Sequence[str]]]):
 
 @functools.cache
 def cached_ccd(user_ccd: str | None = None) -> 'Ccd':
-  """Returns a cached Ccd instance (loaded from pickle only once per unique user_ccd)."""
+  """Returns a cached Ccd instance, one per unique user_ccd."""
   return Ccd(user_ccd=user_ccd)
 
 

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -113,7 +122,7 @@ def get_predicted_structure(
         zip(
             missing_atoms_flat_layout.chain_id,
             missing_atoms_flat_layout.res_id,
-            missing_atoms_flat_layout.res_name,
+            missing_atoms_flat_layout.res_name,  # pyrefly: ignore[bad-argument-type]
             missing_atoms_flat_layout.atom_name,
         )
     )
@@ -129,10 +138,10 @@ def get_predicted_structure(
   # Put them into a structure
   pred_struc = batch.convert_model_output.empty_output_struc
   pred_struc = pred_struc.copy_and_update_atoms(
-      atom_x=pred_flat_atom_coords[..., 0],
-      atom_y=pred_flat_atom_coords[..., 1],
-      atom_z=pred_flat_atom_coords[..., 2],
-      atom_b_factor=pred_flat_b_factors,
+      atom_x=pred_flat_atom_coords[..., 0],  # pyrefly: ignore[bad-argument-type]
+      atom_y=pred_flat_atom_coords[..., 1],  # pyrefly: ignore[bad-argument-type]
+      atom_z=pred_flat_atom_coords[..., 2],  # pyrefly: ignore[bad-argument-type]
+      atom_b_factor=pred_flat_b_factors,  # pyrefly: ignore[bad-argument-type]
       atom_occupancy=np.ones(pred_flat_atom_coords.shape[:-1]),  # Always 1.0.
   )
   # Set manually/differently when adding metadata.
@@ -331,7 +340,7 @@ class Model(hk.Module):
         self.config.evoformer, self.global_config
     )
     target_feat = create_target_feat_embedding(
-        batch=batch,
+        batch=batch,  # pyrefly: ignore[bad-argument-type]
         config=embedding_module.config,
         global_config=self.global_config,
     )
@@ -349,7 +358,7 @@ class Model(hk.Module):
       embeddings['single'] = embeddings['single'].astype(jnp.float32)
       return embeddings, key
 
-    num_res = batch.num_res
+    num_res = batch.num_res  # pyrefly: ignore[missing-attribute]
 
     if self.config.inject_embeddings and injected_single is not None:
       # Skip Evoformer — use caller-supplied embeddings directly.
@@ -394,7 +403,7 @@ class Model(hk.Module):
       )
 
     samples = self._sample_diffusion(
-        batch,
+        batch,  # pyrefly: ignore[bad-argument-type]
         embeddings,
         sample_config=self.config.heads.diffusion.eval,
     )
@@ -406,9 +415,9 @@ class Model(hk.Module):
         )(
             dense_atom_positions=dense_atom_positions,
             embeddings=embeddings,
-            seq_mask=batch.token_features.mask,
-            token_atoms_to_pseudo_beta=batch.pseudo_beta_info.token_atoms_to_pseudo_beta,
-            asym_id=batch.token_features.asym_id,
+            seq_mask=batch.token_features.mask,  # pyrefly: ignore[missing-attribute]
+            token_atoms_to_pseudo_beta=batch.pseudo_beta_info.token_atoms_to_pseudo_beta,  # pyrefly: ignore[missing-attribute]
+            asym_id=batch.token_features.asym_id,  # pyrefly: ignore[missing-attribute]
         ),
         in_axes=0,
     )(samples['atom_positions'])
@@ -628,11 +637,11 @@ class Model(hk.Module):
               'pae_ichain': pae_metrics['pae_ichain'][idx],
               'pae_xchain': pae_metrics['pae_xchain'][idx],
               'ranking_confidence': ranking_confidence[idx],
-              'ranking_confidence_pae': ranking_confidence_pae[idx],
+              'ranking_confidence_pae': ranking_confidence_pae[idx],  # pyrefly: ignore[bad-assignment]
               'chain_pair_iptm': chain_pair_iptm[idx],
               'iptm_ichain': iptm_ichain[idx],
               'iptm_xchain': iptm_xchain[idx],
-              'token_chain_ids': chain_ids,
+              'token_chain_ids': chain_ids,  # pyrefly: ignore[bad-assignment]
               'token_res_ids': res_ids,
           },
           model_id=result['__identifier__'],

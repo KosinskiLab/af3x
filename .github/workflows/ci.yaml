@@ -41,4 +41,4 @@ jobs:
       run: uv run build_data
 
     - name: Run CPU-only tests
-      run: uv run python run_alphafold_data_test.py
+      run: uv run pytest --ignore=run_alphafold_test.py
