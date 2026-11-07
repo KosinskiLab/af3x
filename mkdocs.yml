@@ -1,0 +1,68 @@
+# AF3x documentation site (MkDocs Material). Build: mkdocs build --strict. Deploy: .github/workflows/af3x_docs.yml
+site_name: AF3x
+site_url: https://kosinskilab.github.io/af3x/
+site_description: AlphaFold 3 with explicit crosslinks
+repo_url: https://github.com/KosinskiLab/af3x
+repo_name: KosinskiLab/af3x
+edit_uri: edit/main/docs/
+docs_dir: docs
+copyright: >
+  AF3x is licensed under the Apache License 2.0. AF3x additions © 2024–2026 European Molecular Biology Laboratory
+  (EMBL); AlphaFold 3 code © DeepMind Technologies Limited. Not affiliated with or endorsed by Google DeepMind. Model parameters and outputs are subject to the AlphaFold 3 terms of use.
+
+exclude_docs: |
+  *.csv
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+
+extra_css:
+  - stylesheets/af3x.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Installation: af3x/installation.md
+      - Crosslink input: af3x/crosslink_input.md
+      - Running and output: af3x/running.md
+  - Help:
+      - FAQ: af3x/faq.md
+      - Versions: af3x/versions.md
+  - Tools:
+      - Input generator: https://kosinskilab.github.io/af3x-input-generator/
+  - AlphaFold 3 (upstream v3.0.5):
+      - Installation: installation.md
+      - Input: input.md
+      - Output: output.md
+      - Model parameters: model_parameters.md
+      - Performance: performance.md
+      - Known issues: known_issues.md
+      - Community tools: community_tools.md
+      - Antibody-antigen metadata: metadata_antibody_antigen.md
+  - Legal:
+      - Licence: https://github.com/KosinskiLab/af3x/blob/main/LICENSE
+      - Model parameters terms: https://github.com/KosinskiLab/af3x/blob/main/WEIGHTS_TERMS_OF_USE.md
+      - Prohibited use policy: https://github.com/KosinskiLab/af3x/blob/main/WEIGHTS_PROHIBITED_USE_POLICY.md
+      - Output terms: https://github.com/KosinskiLab/af3x/blob/main/OUTPUT_TERMS_OF_USE.md

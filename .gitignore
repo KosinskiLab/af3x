@@ -24,3 +24,6 @@ src/alphafold3/constants/converters/*.msgpack
 # Environment
 .env
 *.env
+
+# MkDocs build output
+/site/
