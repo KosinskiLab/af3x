@@ -1,3 +1,5 @@
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
+
 [build-system]
 requires = [
     "scikit_build_core",

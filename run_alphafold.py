@@ -16,6 +16,8 @@
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """AlphaFold 3 structure prediction script.
 
