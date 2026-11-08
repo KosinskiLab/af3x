@@ -56,6 +56,9 @@ Input format and reactive residues: [Crosslink input](docs/af3x/crosslink_input.
 | [FAQ](docs/af3x/faq.md) | Common questions |
 | [AlphaFold 3 docs](docs/) | Upstream input format, output, performance, known issues |
 
+Questions and bug reports: [KosinskiLab/af3x issues](https://github.com/KosinskiLab/af3x/issues). Contributing:
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Citing AF3x
 
 If you use AF3x, cite the AF3x preprint

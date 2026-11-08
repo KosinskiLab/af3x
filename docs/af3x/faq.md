@@ -70,6 +70,16 @@ Check with `eval_crosslinks.py` ([Checking XL satisfaction](running.md#checking-
 
 </details>
 
+<details class="question" markdown>
+<summary>Where do I ask a question or report a bug?</summary>
+
+Open an issue at [KosinskiLab/af3x](https://github.com/KosinskiLab/af3x/issues), with the AF3x version
+(`<job>_af3x_version.json`), the input JSON and the error message. Problems that also occur with plain AlphaFold 3
+belong in the [AlphaFold 3 issues](https://github.com/google-deepmind/alphafold3/issues). To contribute code or
+documentation, see [CONTRIBUTING.md](https://github.com/KosinskiLab/af3x/blob/main/CONTRIBUTING.md).
+
+</details>
+
 ## AlphaFold 3 (answers in upstream GitHub issues)
 
 - [SMILES strings with a `\` need to be escaped in the input JSON?](https://github.com/google-deepmind/alphafold3/issues/110)

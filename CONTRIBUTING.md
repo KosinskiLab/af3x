@@ -1,36 +1,33 @@
-# How to Contribute
+# Contributing to AF3x
 
-We welcome small patches related to bug fixes and documentation, but we do not
-plan to make any major changes to this repository.
+## Questions and bug reports
 
-## AI Generated Code
+Open an issue at [KosinskiLab/af3x](https://github.com/KosinskiLab/af3x/issues). Include the AF3x version (the
+`<job>_af3x_version.json` file of the run, or `git describe --tags --match 'af3x-v*'`), the input JSON and the error message.
 
-We welcome the use of AI tools for the generation of code, documentation and/or
-Pull Request (PR) description as long as:
+If the problem also occurs with plain AlphaFold 3 (no crosslinks), report it to
+[AlphaFold 3](https://github.com/google-deepmind/alphafold3/issues) instead.
 
-1.  It has been transparently labelled as such. Make sure to declare it in the
-    PR message.
-2.  You have manually reviewed the code before sending the PR.
-3.  The change has been manually tested. We might ask you to fold a certain
-    input to check correctness of the PR.
+## Pull requests
 
-Please do not submit AI generated PRs where test results have been hallucinated.
+Pull requests with bug fixes, new crosslinkers and documentation improvements are welcome. Open them against the
+`experimental` branch, with a short description of the change and how you tested it:
 
-## Contributor License Agreement
+- run the CPU tests: `python run_alphafold_data_test.py` and
+  `python -m pytest --ignore=run_alphafold_test.py` (do not pass `-v`: absl reads it as its own flag);
+- for a new or changed crosslinker, include an example input JSON that uses it.
 
-Contributions to this project must be accompanied by a Contributor License
-Agreement. You (or your employer) retain the copyright to your contribution,
-this simply gives us permission to use and redistribute your contributions as
-part of the project. Head over to <https://cla.developers.google.com/> to see
-your current agreements on file or to sign a new one.
+## AI-generated code
 
-You generally only need to submit a CLA once, so if you've already submitted one
-(even if it was for a different project), you probably don't need to do it
-again.
+AI tools may be used for code, documentation and pull request descriptions, as long as:
 
-## Code reviews
+1. it is declared in the pull request description;
+2. you have reviewed the code yourself;
+3. you have tested the change. We may ask you to run a prediction to check it.
 
-All submissions, including submissions by project members, require review. We
-use GitHub pull requests for this purpose. Consult
-[GitHub Help](https://help.github.com/articles/about-pull-requests/) for more
-information on using pull requests.
+Do not submit pull requests with invented test results.
+
+## Licence
+
+AF3x is licensed under the [Apache License 2.0](LICENSE). By submitting a contribution you agree that it is
+licensed under the same terms (section 5 of the licence). No separate contributor agreement is needed.
