@@ -1,7 +1,16 @@
 // Copyright 2024 DeepMind Technologies Limited
 //
-// AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-// this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+// AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // To request access to the AlphaFold 3 model parameters, follow the process set
 // out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -355,12 +364,12 @@ inline MmcifLayout ReadMmcifLayout(const CifDict& mmcif,
   throw py::value_error(std::string(mmcif_layout.status().message()));
 }
 
-std::pair<py::object, MmcifLayout> MmcifFilter(  //
-    const CifDict& mmcif,                        //
-    bool include_nucleotides,                    //
-    bool include_ligands,                        //
-    bool include_water,                          //
-    bool include_other,                          //
+py::tuple MmcifFilter(         //
+    const CifDict& mmcif,      //
+    bool include_nucleotides,  //
+    bool include_ligands,      //
+    bool include_water,        //
+    bool include_other,        //
     absl::string_view model_id) {
   if (_import_array() < 0) {
     throw py::import_error("Failed to import NumPy.");
@@ -368,15 +377,15 @@ std::pair<py::object, MmcifLayout> MmcifFilter(  //
   auto layout = ReadMmcifLayout(mmcif, model_id);
   std::unique_ptr<std::vector<std::uint64_t>> keep_indices;
   size_t new_num_atoms;
+  absl::flat_hash_set<absl::string_view> keep_chain_ids;
 
   {
     py::gil_scoped_release release;
 
     AtomSiteLoop atom_site(mmcif);
 
-    auto keep_chain_ids =
-        SelectChains(mmcif, include_nucleotides, include_ligands, include_water,
-                     include_other);
+    keep_chain_ids = SelectChains(mmcif, include_nucleotides, include_ligands,
+                                  include_water, include_other);
 
     std::vector<std::size_t> chain_indices;
     chain_indices.reserve(keep_chain_ids.size());
@@ -422,7 +431,7 @@ std::pair<py::object, MmcifLayout> MmcifFilter(  //
       });
   PyArray_SetBaseObject(reinterpret_cast<PyArrayObject*>(arr), capsule);
 
-  return std::make_pair(py::reinterpret_steal<py::object>(arr),
+  return py::make_tuple(py::reinterpret_steal<py::object>(arr), keep_chain_ids,
                         std::move(layout));
 }
 

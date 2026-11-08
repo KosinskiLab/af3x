@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -75,7 +84,7 @@ def _mol_from_ligand_struc(
   """Creates a Mol object from a ligand structure and reference mol."""
 
   if ligand_struc.num_residues(count_unresolved=True) > 1:
-    raise ValueError('ligand_struc %s has more than one residue.')
+    raise ValueError(f'{ligand_struc=} has more than one residue.')
   coords_by_atom_name = dict(zip(ligand_struc.atom_name, ligand_struc.coords))
 
   ref_mol = rdkit_utils.sanitize_mol(
@@ -117,7 +126,7 @@ def _mol_from_ligand_struc(
 
 def _maybe_mol_from_ccd(res_name: str) -> rd_chem.Mol | None:
   """Creates a Mol object from CCD information if res_name is in the CCD."""
-  ccd = chemical_components.cached_ccd()
+  ccd = chemical_components.Ccd()
   ccd_cif = ccd.get(res_name)
   if not ccd_cif:
     logging.warning('No ccd information for residue %s.', res_name)

@@ -1,187 +1,102 @@
-![header](docs/header3x.jpg)
+<picture>
+  <source srcset="docs/af3x/af3x_scheme.svg" type="image/svg+xml">
+  <img src="docs/af3x/af3x_scheme.png" alt="AF3x scheme: crosslinking data and sequences are converted to a bound crosslinker ligand and modelled by AlphaFold 3" class="af3x-scheme" width="100%">
+</picture>
 
-# AF3x - Custom modification of AlphaFold 3 enabling explicit modeling of crosslinks
+# AF3x: AlphaFold 3 with explicit crosslinks
 
-**Warning: This is a custom fork and not the official version. In active development. Code quick and dirty, don't look. Bugs expected. Not always in sync with upstream. Use at your own risk. Fixes and PRs welcome.**
+**[Documentation](https://kosinskilab.github.io/af3x/) | [Preprint](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v4)**
 
-By Agnieszka Obarska-Kosinska (idea and crosslink definitions) and Jan Kosinski (implementation).
+AF3x models chemical crosslinks (XLs) explicitly: each crosslinker is added as a ligand, covalently bonded to both
+crosslinked residues. Other XL-based modelling tools use distance restraints between the residues instead.
 
-Most crosslink-based modeling programs implicitly model crosslinks by adding distance restraints between crosslinked residues. This program explicitly models crosslinks by adding crosslinker molecules as ligands and setting bonds to the crosslinked residues. This allows for more realistic modeling of crosslinks, and sometimes gives good results. The results are also more visually appealing. 
+Research software under active development. AF3x is a fork of AlphaFold 3 and is not affiliated with or endorsed
+by Google DeepMind.
 
-Read more in the prep-print: [Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v2).
+**Current version:** `af3x-v0.3.0`, based on AlphaFold 3 v3.0.5 ([all versions](docs/af3x/versions.md)).
 
-Usage:
+This README has two parts: AF3x (this part) and the [original AlphaFold 3 README](#alphafold-3) below it.
 
-1. Install AlphaFold 3 as per the instructions in the original README below.
-1. Clone this repo
-1. Install, for example like this:
-    ```bash
-    module load GCCcore/12.3.0
-    module load Mamba
+## Installation
 
-    mamba create -n af3x python=3.11 -y
-    source activate af3x
+See [Installing AF3x](docs/af3x/installation.md). AF3x uses the AlphaFold 3 model parameters, which you obtain from
+Google (AF3x does not distribute them), and the AlphaFold 3 genetic databases.
 
-    cd af3x
-    pip install -r dev-requirements.txt
+## Usage
 
-    # Install the package in editable mode without dependencies
-    pip install -e . --no-deps 
-
-    build_data
-    ```
-1. Add crosslinks to your JSON following this format:
-    ```json
-        "crosslinks": [
-            {
-                "name": "DSSO",
-                "residue_pairs": [
-                    [["B", 53], ["C", 66]],
-                    [["B", 54], ["C", 66]],
-                    [["B", 54], ["C", 113]],
-                    [["B", 53], ["C", 113]],
-                    [["B", 54], ["C", 106]],
-                    [["B", 67], ["C", 129]],
-                    [["B", 208], ["C", 129]],
-                    [["A", 1], ["C", 91]],
-                    [["A", 1], ["C", 99]],
-                    [["A", 1], ["C", 90]],
-                    [["A", 49], ["C", 113]],
-                    [["A", 145], ["C", 129]]
-                ]
-            },
-            {
-                "name": "azide-A-DSBSO",
-                "residue_pairs": [
-                    ...
-                ]
-            }
-        ]
-    ```
-    for example:
-    ```json
-    {
-        "name": "9G5K",
-        "modelSeeds": [
-            1
-        ],
-        "sequences": [
-            {
-                "protein": {
-                    "id": "A",
-                    "sequence": "MDCYRTSLSSSWIYPTVILCLFGFFSMMRPSEPFLIPYLSGPDKNLTSAEITNEIFPVWTYSYLVLLLPVFVLTDYVRYKPVIILQGISFIITWLLLLFGQGVKTMQVVEFFYGMVTAAEVAYYAYIYSVVSPEHYQRVSGYCRSVTLAAYTAGSVLAQLLVSLANMSYFYLNVISLASVSVAFLFSLFLPMPKKSMFFHAKPSREIKKSSSVNPVLEETHEGEAPGCEEQKPTSEILSTSGKLNKGQLNSLKPSNVTVDVFVQWFQDLKECYSSKRLFYWSLWWAFATAGFNQVLNYVQILWDYKAPSQDSSIYNGAVEAIATFGGAVAAFAVGYVKVNWDLLGELALVVFSVVNAGSLFLMHYTANIWACYAGYLIFKSSYMLLITIAVFQIAVNLNVERYALVFGINTFIALVIQTIMTVIVVDQRGLNLPVSIQFLVYGSYFAVIAGIFLMRSMYITYSTKSQKDVQSPAPSENPDVSHPEEESNIIMSTKL"
-                }
-            },
-            {
-                "protein": {
-                    "id": "B",
-                    "sequence": "QVQLVESGGGLVQAGDSLRLSCAASGRTFSNYYMAWFRQAPGKEREFVAAIRLSYGSTYYADSVRGRFTISKDNAKNTVNLRMNSLKSEDTAIYYCAAAEDRWALAVRTATTYNYWGQGTQVTVSSHHHHHHEPEA"
-                }
-            }
-        ],
-        "dialect": "alphafold3",
-        "version": 1,
-        "crosslinks": [
-            {
-                "name": "azide-A-DSBSO",
-                "residue_pairs": [
-                    [["A", 104], ["B", 43]]
-                ]
-            }
-        ]
-    }
-    ```
-
-    > If you use asymmetrical crosslinks like SDA, the first residue in the pair should be the one that reacted with the NHS ester (K, S, T, Y, N-terminal), and the second should be the one that reacted with the diazirine group.
-
-    Supported crosslinkers:
-    - DSSO
-    - DSS
-    - DSG
-    - CDI
-    - BS3
-    - BS2G
-    - azide-A-DSBSO
-    - DSBU
-    - PHOX
-    - BSPEG5
-    - BSPEG9
-    - SDA (same as Sulfo-SDA)
-    - LCSDA (same as Sulfo-LC-SDA)
-    - SDAD (same as Sulfo-SDAD)
-1. Run AlphaFold 3 as per the instructions in the original README below. Crosslinks will be added automatically.
-
-    Key flags:
-    ```bash
-    --sample_crosslink_combinations=<integer> # Enumarate all possible combinations of crosslinks with length equal to sample_crosslinks value and run inference for each combination. Default is do not sample.
-    --remove_overlapping_crosslinks=true|false # If set to true, remove any crosslinks that link to residues with already added crosslinks. Default is true.
-    --num_seeds=<integer> # Number of seeds to sample. Default is use the seeds from your input JSON but we recommend to use at least 20 seeds (with the default 5 diffusion samples per seed, it gives 100 models).
-    ```
-
-# Even more experimental features
-
-## Disulfide bonds
-
-```json
-  "disulfide_bonds": [
-      {
-          "residue_pairs": [
-              [["A", 14], ["A", 20]],
-              [["A", 8], ["A", 26]],
-              [["A", 6], ["A", 28]],
-              [["A", 2], ["A", 32]]
-          ]
-      }
-  ]
-``` 
-Disulfide bonds will be added by mutating the cysteines to alanine and adding an S-S covalent ligand. Thanks Konstantin Gilep for the idea.
-
-## Dynamic crosslinks (experimental)
-
-Dynamic crosslinks have a variable length and can connect **any pair of residues** (the bond is formed to the last sidechain atom of each residue). The crosslinker type is specified as a name followed by a number that controls the length:
-
-- **`LINK<n>`** — a flexible poly-carbon chain of `n` carbon atoms (e.g. `LINK3` = 3-carbon linker R1-(CH<sub>2</sub>)<sub>3</sub>-R2, `LINK10` = 10-carbon linker).
-- **`RIGID<n>`** — a rigid structure made of `n` fused benzene rings (e.g. `RIGID1` = single benzene, `RIGID3` = triphenylene-like scaffold).
-
-Example JSON using a 5-carbon flexible linker between two arbitrary residues:
+Add the XLs to an AlphaFold 3 input JSON:
 
 ```json
 "crosslinks": [
-    {
-        "name": "LINK5",
-        "residue_pairs": [
-            [["A", 10], ["B", 42]]
-        ]
-    }
+  {"name": "DSSO", "residue_pairs": [[["A", 53], ["B", 66]], [["A", 54], ["B", 113]]]}
 ]
 ```
 
-## Zero-length crosslinks (coming soon)
+and run `run_alphafold.py` as for AlphaFold 3. Example with a test input:
 
-By this point you might know how it will be done.
+```sh
+python run_alphafold.py \
+  --json_path=src/alphafold3/test_data/crosslinks/9G5K/9G5K_input.json \
+  --output_dir=output --model_dir=<MODEL_DIR> --norun_data_pipeline
+```
 
-## Observations:
+Supported crosslinkers: DSSO, DSS, DSG, BS3, BS2G, DSBU, PHOX, BSPEG5, BSPEG9, azide-A-DSBSO, CDI; SDA, LCSDA, SDAD,
+SDA25A (NHS ester + diazirine); `LINK<N>`, `RIGID<N>` (generic linkers); disulfide bonds.
+Input format and reactive residues: [Crosslink input](docs/af3x/crosslink_input.md); flags and output:
+[Running and output](docs/af3x/running.md).
 
-- This sometimes works.
-- Sometimes it doesn't.
-- When not all crosslinks can be satisfied at the same time, AF3 will sometimes form some crosslinks but break bonds for others, kind off ignoring imcompatible crosslinks (this is good).
+## Documentation
 
-## How to add your own crosslinker type?
+| Page | Content |
+|---|---|
+| [Crosslink input](docs/af3x/crosslink_input.md) | XL input format, supported XLs, disulfide bonds, adding an XL |
+| [Running and output](docs/af3x/running.md) | Command, AF3x flags, seeds, output, checking XLs |
+| [Installation](docs/af3x/installation.md) | Requirements, databases, model parameters, install, HMMER |
+| [Versions](docs/af3x/versions.md) | AF3x versions, AlphaFold 3 base, reproducibility |
+| [FAQ](docs/af3x/faq.md) | Common questions |
+| [AlphaFold 3 docs](docs/) | Upstream input format, output, performance, known issues |
 
-Find the file `af3x/src/alphafold3/crosslinks/crosslink_definitions.py` and add your own crosslinker definition by following the provided examples. 
->[!NOTE]
->The package should be installed in editable mode `pip install -e . --no-deps` Otherwise, you will need to rerun: `pip install --no-deps .` after adding a new crosslinker.
+Questions and bug reports: [KosinskiLab/af3x issues](https://github.com/KosinskiLab/af3x/issues). Contributing:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Test data
-The test data is available in `af3x/src/alphafold3/test_data/crosslinks` folder.
+## Citing AF3x
 
-# OIRIGINAL ALPHAFOLD3 README
+If you use AF3x, cite the AF3x preprint
+([Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v4))
+and AlphaFold 3 ([citation below](#citing-this-work)).
+
+## Licence and terms
+
+AF3x is licensed under the [Apache License 2.0](LICENSE), like the AlphaFold 3 source code it contains.
+AF3x additions © 2024–2026 European Molecular Biology Laboratory (EMBL); AlphaFold 3 code © DeepMind Technologies
+Limited. AlphaFold 3 files changed for AF3x carry a notice at the top; the changed test data files `src/alphafold3/test_data/featurised_example.json` and
+`src/alphafold3/test_data/model_config.json` cannot hold comments. The AlphaFold 3 model parameters and outputs are
+subject to the [model parameters terms of use](WEIGHTS_TERMS_OF_USE.md), the
+[prohibited use policy](WEIGHTS_PROHIBITED_USE_POLICY.md) and the [output terms of use](OUTPUT_TERMS_OF_USE.md);
+AF3x outputs are AlphaFold 3 outputs. The AlphaFold 3 licence and disclaimer below apply.
+
+<br>
+
+---
+---
+
+> [!NOTE]
+> **End of the AF3x part.** Below is the original AlphaFold 3 README (v3.0.5), unchanged. It describes AlphaFold 3,
+> not AF3x: for installing and running AF3x, use the sections above.
+
+---
+---
+
+<!-- AF3X: upstream AlphaFold 3 README below, verbatim (check at each sync: diff against `git show <tag>:README.md`). -->
 
 ![header](docs/header.jpg)
 
-This package provides an implementation of the inference pipeline of AlphaFold
-3. See below for how to access the model parameters. You may only use AlphaFold
-3 model parameters if received directly from Google. Use is subject to these
+# AlphaFold 3
+
+This package provides an implementation of the inference pipeline of
+AlphaFold 3. See below for how to access the model parameters. You may only use
+AlphaFold 3 model parameters if received directly from Google. Use is subject to
+these
 [terms of use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
 
 Any publication that discloses findings arising from using this source code, the
@@ -197,18 +112,32 @@ AlphaFold 3 is also available at
 [alphafoldserver.com](https://alphafoldserver.com) for non-commercial use,
 though with a more limited set of ligands and covalent modifications.
 
+For commercial use, AlphaFold 3 is available via
+[Gemini Enterprise Agent Platform on Google Cloud](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/open-models/alphafold-3).
+
 If you have any questions, please contact the AlphaFold team at
 [alphafold@google.com](mailto:alphafold@google.com).
 
 ## Obtaining Model Parameters
 
-This repository contains all necessary code for AlphaFold 3 inference. To
-request access to the AlphaFold 3 model parameters, please complete
-[this form](https://forms.gle/svvpY4u2jsHEwWYS6). Access will be granted at
-Google DeepMind’s sole discretion. We will aim to respond to requests within 2–3
-business days. You may only use AlphaFold 3 model parameters if received
-directly from Google. Use is subject to these
+This repository contains all necessary code for AlphaFold 3 inference. You can
+download the AlphaFold 3 model parameters from
+https://storage.googleapis.com/alphafold3/af3.bin.zst. Use is subject to these
 [terms of use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md).
+
+The model parameters for the SynthID Bio-structure version of AlphaFold 3, which
+predicts watermarked structures, is available at
+https://storage.googleapis.com/alphafold3/af3_synthid.bin.zst. See
+[google-deepmind/synthidbio](https://github.com/google-deepmind/synthidbio) for
+more details.
+
+The model parameters for AlphaFold 3 Leaving Atom (AF3-LA) can be used as an
+alternative model fine-tuned for leaving atom handling. The weights are
+available at https://storage.googleapis.com/alphafold3/af3_leaving_atom.bin.zst
+and are subject to the same terms of use as the original AlphaFold 3 model
+parameters. See
+[google-deepmind/alphaprotein-novo](https://github.com/google-deepmind/alphaprotein-novo)
+for more details.
 
 ## Installation and Running Your First Prediction
 
@@ -317,21 +246,17 @@ AlphaFold 3 uses the following separate libraries and packages:
 
 *   [abseil-cpp](https://github.com/abseil/abseil-cpp) and
     [abseil-py](https://github.com/abseil/abseil-py)
-*   [Chex](https://github.com/deepmind/chex)
 *   [Docker](https://www.docker.com)
 *   [DSSP](https://github.com/PDB-REDO/dssp)
 *   [HMMER Suite](https://github.com/EddyRivasLab/hmmer)
 *   [Haiku](https://github.com/deepmind/dm-haiku)
 *   [JAX](https://github.com/jax-ml/jax/)
-*   [jax-triton](https://github.com/jax-ml/jax-triton)
-*   [jaxtyping](https://github.com/patrick-kidger/jaxtyping)
 *   [libcifpp](https://github.com/pdb-redo/libcifpp)
 *   [NumPy](https://github.com/numpy/numpy)
 *   [pybind11](https://github.com/pybind/pybind11) and
     [pybind11_abseil](https://github.com/pybind/pybind11_abseil)
 *   [RDKit](https://github.com/rdkit/rdkit)
-*   [Tree](https://github.com/deepmind/tree)
-*   [Triton](https://github.com/triton-lang/triton)
+*   [Tokamax](https://github.com/openxla/tokamax)
 *   [tqdm](https://github.com/tqdm/tqdm)
 
 We thank all their contributors and maintainers!
@@ -345,6 +270,9 @@ We would love to hear your feedback and understand how AlphaFold 3 has been
 useful in your research. Share your stories with us at
 [alphafold@google.com](mailto:alphafold@google.com).
 
+For questions surrounding SynthID Bio-structure, please contact
+[synthidbio@google.com](mailto:synthidbio@google.com).
+
 ## Licence and Disclaimer
 
 This is not an officially supported Google product.
@@ -353,11 +281,10 @@ Copyright 2024 DeepMind Technologies Limited.
 
 ### AlphaFold 3 Source Code and Model Parameters
 
-The AlphaFold 3 source code is licensed under the Creative Commons
-Attribution-Non-Commercial ShareAlike International License, Version 4.0
-(CC-BY-NC-SA 4.0) (the "License"); you may not use this file except in
-compliance with the License. You may obtain a copy of the License at
-[https://github.com/google-deepmind/alphafold3/blob/main/LICENSE](https://github.com/google-deepmind/alphafold3/blob/main/LICENSE).
+AlphaFold 3 source code is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use its source code except in compliance with the
+License. You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0.
 
 The AlphaFold 3 model parameters are made available under the
 [AlphaFold 3 Model Parameters Terms of Use](https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md)

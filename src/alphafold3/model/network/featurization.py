@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -16,7 +25,6 @@ from alphafold3.constants import residue_names
 from alphafold3.model import feat_batch
 from alphafold3.model import features
 from alphafold3.model.components import utils
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -109,7 +117,7 @@ def gumbel_argsort_sample_idx(
   return perm[::-1]
 
 
-def create_msa_feat(msa: features.MSA) -> chex.ArrayDevice:
+def create_msa_feat(msa: features.MSA) -> jax.Array:
   """Create and concatenate MSA features."""
   msa_1hot = jax.nn.one_hot(
       msa.rows, residue_names.POLYMER_TYPES_NUM_WITH_UNKNOWN_AND_GAP + 1
@@ -137,7 +145,7 @@ def truncate_msa_batch(msa: features.MSA, num_msa: int) -> features.MSA:
 def create_target_feat(
     batch: feat_batch.Batch,
     append_per_atom_features: bool,
-) -> chex.ArrayDevice:
+) -> jax.Array:
   """Make target feat."""
   token_features = batch.token_features
   target_features = []
@@ -155,7 +163,7 @@ def create_target_feat(
     ref_mask = batch.ref_structure.mask
     element_feat = jax.nn.one_hot(batch.ref_structure.element, 128)
     element_feat = utils.mask_mean(
-        mask=ref_mask[..., None], value=element_feat, axis=-2, eps=1e-6
+        mask=ref_mask[..., None], value=element_feat, axis=-2, eps=1e-6  # pyrefly: ignore[bad-argument-type]
     )
     target_features.append(element_feat)
     pos_feat = batch.ref_structure.positions
@@ -170,7 +178,7 @@ def create_relative_encoding(
     seq_features: features.TokenFeatures,
     max_relative_idx: int,
     max_relative_chain: int,
-) -> chex.ArrayDevice:
+) -> jax.Array:
   """Add relative position encodings."""
   rel_feats = []
   token_index = seq_features.token_index

@@ -1,13 +1,28 @@
 # AlphaFold 3 Input
 
+This is documentation for the AlphaFold 3 JSON input format. If you are looking
+for documentation of the AlphaFold 3 Google Cloud API, please refer to
+[this API reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/open-models/alphafold-3#api-reference).
+
 ## Specifying Input Files
 
 You can provide inputs to `run_alphafold.py` in one of two ways:
 
 -   Single input file: Use the `--json_path` flag followed by the path to a
-    single JSON file.
+    single JSON file. This path can be either a local path or a Google Cloud
+    Storage path (starting with `gs://`), if enabled.
 -   Multiple input files: Use the `--input_dir` flag followed by the path to a
-    directory of JSON files.
+    directory of JSON files. This path can be either a local directory path or a
+    GCS path, if enabled.
+-   Within an input file, fields with names ending in `Path` (e.g.
+    `pairedMsaPath`) can be provided as Google Cloud Storage paths, if enabled.
+
+### Note: Google Cloud Storage paths
+
+Google Cloud Storage (`gs://`) paths are supported for certain flags and fields
+if the optional `gcsfs` dependency is installed. See the
+[installation instructions](installation.md#optional-enable-google-cloud-storage-path-support)
+for details and a complete list of supported paths.
 
 ## Input Format
 
@@ -28,6 +43,9 @@ The custom AlphaFold 3 format allows:
     them via the [user-provided CCD](#user-provided-ccd).
 *   Specifying covalent bonds between entities.
 *   Specifying multiple random seeds.
+
+Multiple examples of input JSON files are provided in
+https://github.com/google-deepmind/alphafold3/tree/main/examples.
 
 ## AlphaFold Server JSON Compatibility
 
@@ -113,10 +131,11 @@ The top-level structure of the input JSON is:
     {"dna": {...}},
     {"ligand": {...}}
   ],
-  "bondedAtomPairs": [...],  # Optional
-  "userCCD": "...",  # Optional
-  "dialect": "alphafold3",  # Required
-  "version": 2  # Required
+  "bondedAtomPairs": [...],  # Optional.
+  "userCCD": "...",  # Optional, mutually exclusive with userCCDPath.
+  "userCCDPath": "...",  # Optional, mutually exclusive with userCCD.
+  "dialect": "alphafold3",  # Required.
+  "version": 4  # Required.
 }
 ```
 
@@ -140,6 +159,12 @@ The fields specify the following:
     in such cases since it doesn't give the possibility of uniquely naming all
     atoms. It can also be used to provide a reference conformer for cases where
     RDKit fails to generate a conformer. See more below.
+*   `userCCDPath: str`: An optional path to a file that contains the
+    user-provided chemical components dictionary instead of providing it inline
+    using the `userCCD` field. The path can be either absolute, or relative to
+    the input JSON path. The file must be in the
+    [CCD mmCIF format](https://www.wwpdb.org/data/ccd#mmcifFormat), and could be
+    either plain text, or compressed using gzip, xz, or zstd.
 *   `dialect: str`: The dialect of the input JSON. This must be set to
     `alphafold3`. See
     [AlphaFold Server JSON Compatibility](#alphafold-server-json-compatibility)
@@ -151,12 +176,16 @@ The fields specify the following:
 
 ## Versions
 
-The top-level `version` field (for the `alphafold3` dialect) can be either `1`
-or `2`. The following features have been added in respective versions:
+The top-level `version` field (for the `alphafold3` dialect) can be either `1`,
+`2`, or `3`. The following features have been added in respective versions:
 
 *   `1`: the initial AlphaFold 3 input format.
 *   `2`: added the option of specifying external MSA and templates using newly
     added fields `unpairedMsaPath`, `pairedMsaPath`, and `mmcifPath`.
+*   `3`: added the option of specifying external user-provided CCD using newly
+    added field `userCCDPath`.
+*   `4`: added the option of specifying textual `description` of protein chains,
+    RNA chains, DNA chains, or ligands.
 
 ## Sequences
 
@@ -177,6 +206,7 @@ Specifies a single protein chain.
       {"ptmType": "HY3", "ptmPosition": 1},
       {"ptmType": "P1L", "ptmPosition": 5}
     ],
+    "description": ...,  # Optional.
     "unpairedMsa": ...,  # Mutually exclusive with unpairedMsaPath.
     "unpairedMsaPath": ...,  # Mutually exclusive with unpairedMsa.
     "pairedMsa": ...,  # Mutually exclusive with pairedMsaPath.
@@ -198,6 +228,9 @@ The fields specify the following:
     post-translational modifications. Each modification is specified using its
     CCD code and 1-based residue position. In the example above, we see that the
     first residue won't be a proline (`P`) but instead `HY3`.
+*   `description: str`: An optional textual description of this chain. This
+    field will is only used in the JSON format and serves as a comment
+    describing this chain.
 *   `unpairedMsa: str`: An optional multiple sequence alignment for this chain.
     This is specified using the A3M format (equivalent to the FASTA format, but
     also allows gaps denoted by the hyphen `-` character). See more details
@@ -230,6 +263,7 @@ Specifies a single RNA chain.
       {"modificationType": "2MG", "basePosition": 1},
       {"modificationType": "5MC", "basePosition": 4}
     ],
+    "description": ...,  # Optional.
     "unpairedMsa": ...,  # Mutually exclusive with unpairedMsaPath.
     "unpairedMsaPath": ...  # Mutually exclusive with unpairedMsa.
   }
@@ -246,6 +280,9 @@ The fields specify the following:
     letters `A`, `C`, `G`, `U`.
 *   `modifications: list[RnaModification]`: An optional list of modifications.
     Each modification is specified using its CCD code and 1-based base position.
+*   `description: str`: An optional textual description of this chain. This
+    field will is only used in the JSON format and serves as a comment
+    describing this chain.
 *   `unpairedMsa: str`: An optional multiple sequence alignment for this chain.
     This is specified using the A3M format. See more details below.
 *   `unpairedMsaPath: str`: An optional path to a file that contains the
@@ -266,7 +303,8 @@ Specifies a single DNA chain.
     "modifications": [
       {"modificationType": "6OG", "basePosition": 1},
       {"modificationType": "6MA", "basePosition": 2}
-    ]
+    ],
+    "description": ...  # Optional.
   }
 }
 ```
@@ -281,6 +319,9 @@ The fields specify the following:
     letters `A`, `C`, `G`, `T`.
 *   `modifications: list[DnaModification]`: An optional list of modifications.
     Each modification is specified using its CCD code and 1-based base position.
+*   `description: str`: An optional textual description of this chain. This
+    field will is only used in the JSON format and serves as a comment
+    describing this chain.
 
 ### Ligands
 
@@ -305,19 +346,22 @@ Specifies a single ligand. Ligands can be specified using 3 different formats:
 {
   "ligand": {
     "id": ["G", "H", "I"],
-    "ccdCodes": ["ATP"]
+    "ccdCodes": ["ATP"],
+    "description": ...  # Optional.
   }
 },
 {
   "ligand": {
     "id": "J",
-    "ccdCodes": ["LIG-1337"]
+    "ccdCodes": ["LIG-1337"],
+    "description": ...  # Optional.
   }
 },
 {
   "ligand": {
     "id": "K",
-    "smiles": "CC(=O)OC1C[NH+]2CCC1CC2"
+    "smiles": "CC(=O)OC1C[NH+]2CCC1CC2",
+    "description": ...  # Optional.
   }
 }
 ```
@@ -333,6 +377,9 @@ The fields specify the following:
     [user-provided CCD](#user-provided-ccd).
 *   `smiles: str`: An optional string defining the ligand using a SMILES string.
     The SMILES string must be correctly JSON-escaped.
+*   `description: str`: An optional textual description of this chain. This
+    field will is only used in the JSON format and serves as a comment
+    describing this ligand.
 
 Each ligand may be specified using CCD codes or SMILES but not both, i.e. for a
 given ligand, the `ccdCodes` and `smiles` fields are mutually exclusive.
@@ -395,10 +442,11 @@ the paper.
 
 RNA `unpairedMsa` can be either:
 
-1.  Unset (or set explicitly to `null`). AlphaFold 3 won't build MSA for this
-    RNA chain.
-2.  Set to an empty string (`""`). AlphaFold 3 won't build MSA and will run
-    MSA-free for this RNA chain.
+1.  Unset (or set explicitly to `null`). AlphaFold 3 will build MSA for this RNA
+    chain automatically. This is the recommended option.
+2.  Set to an empty string (`""`). AlphaFold 3 won't build the MSA for this RNA
+    chain and the MSA input to the model will be just the RNA chain (equivalent
+    to running MSA-free for this RNA chain).
 3.  Set to a non-empty A3M string. AlphaFold 3 will use the provided MSA for
     this RNA chain.
 
@@ -409,7 +457,7 @@ unpaired MSA (see [MSA Pairing](#msa-pairing) below for more details).
 
 The following combinations are valid for a given protein chain:
 
-1.  Both `unpairedMsa` and `pairedMsa` fields are unset (or explicitly set to
+1.  Both `unpairedMsa` and `pairedMsa` fields are unset (or set explicitly to
     `null`), AlphaFold 3 will build both MSAs automatically. This is the
     recommended option.
 2.  The `unpairedMsa` is set to to a non-empty A3M string, `pairedMsa` set to an
@@ -477,10 +525,16 @@ opposed to relying on name-matching post-processing heuristics used for
 When setting `unpairedMsa` manually, the `pairedMsa` must be explicitly set to
 an empty string (`""`).
 
+Make sure to run with `--resolve_msa_overlaps=false`. This prevents
+deduplication of the unpaired MSA within each chain against the paired MSA
+sequences. Even if you set `pairedMsa` to an empty string, the query sequence(s)
+will still be added in there and the deduplication procedure could destroy the
+carefully crafted sequence positioning in the unpaired MSA.
+
 For instance, if there are two chains `DEEP` and `MIND` which we want to be
 paired on organism A and C, we can achieve it as follows:
 
-```text
+```txt
 > query
 DEEP
 > match 1 (organism A)
@@ -491,7 +545,7 @@ DD-P
 DD-P
 ```
 
-```text
+```txt
 > query
 MIND
 > match 1 (organism A)
@@ -504,7 +558,7 @@ MIN-
 
 The resulting MSA when chains are concatenated will then be:
 
-```text
+```txt
 > query
 DEEPMIND
 > match 1 + match 1
@@ -542,7 +596,9 @@ The fields specify the following:
 *   `queryIndices: list[int]`: O-based indices in the query sequence, defining
     the mapping from query residues to template residues.
 *   `templateIndices: list[int]`: O-based indices in the template sequence,
-    defining the mapping from query residues to template residues.
+    specifying the mapping from query residues to template residues defined in
+    the mmCIF file. Note that unresolved mmCIF residues must be taken into
+    account when specifying template indices.
 
 A template is specified as an mmCIF string containing a single chain with the
 structural template together with a 0-based mapping that maps query residue
@@ -554,6 +610,14 @@ you would specify the two indices lists as:
 "queryIndices":    [0, 1, 2, 3],
 "templateIndices": [0, 2, 5, 6]
 ```
+
+Note that mmCIFs can have residues with missing atom coordinates (present in
+residue tables but missing in the `_atom_site` table) – these must be taken into
+account when specifying template indices. E.g. to align residues 4–7 in a
+template with unresolved residues 1, 2, 3 and resolved residues 4, 5, 6, 7, you
+need to set the template indices to 3, 4, 5, 6 (since 0-based indexing is used).
+An example of a protein with unresolved residues 1–20 can be found here:
+https://www.rcsb.org/structure/8UXY.
 
 You can provide multiple structural templates. Note that if an mmCIF containing
 more than one chain is provided, you will get an error since it is not possible
@@ -675,6 +739,11 @@ You will need to specify:
 2.  Ligand chain B with the 4 components.
 3.  Bonds ASN-CMP1, CMP1-CMP2, CMP2-CMP3, CMP2-CMP4.
 
+When a glycan component is linked, AlphaFold 3 removes its atom named `O1`
+(unless `O1` is the bonded atom). This is correct for aldoses but not for
+ketoses such as sialic acids or fructose, see
+[Known Issues](known_issues.md#linked-ketoses-keep-their-leaving-atom).
+
 ## User-provided CCD
 
 There are two approaches to model a custom ligand not defined in the CCD:
@@ -697,6 +766,39 @@ as it could cause issues in the mmCIF format.
 The newly defined ligand can then be used as a standard CCD ligand using its
 custom name, and bonds can be linked to it using its named atom scheme.
 
+### Using user-provided CCD for polymer modifications
+
+The user-provided CCD can also be used for specifying non-canonical amino acids
+or nucleotides in the protein/RNA/DNA chains, not only custom ligands.
+
+In this case, the custom component is referenced from the polymer
+`modifications` field using its CCD component ID:
+
+```json
+{
+  "protein": {
+    "id": "A",
+    "sequence": "MDQHQAFKEATELLEKMKTSSDEERVEYLRKAVRLFNLTSEGQQGELVGKFKEAGVLIRAVDLS",
+    "modifications": [{"ptmType": "MYMOD", "ptmPosition": 30}]
+  }
+}
+```
+
+In the example above, residue 30 is replaced by the custom component `MYMOD`.
+
+*   `ptmType` must match the component ID defined in the user-provided CCD.
+*   The user-provided CCD should describe an appropriate peptide-linking polymer
+    component rather than a free non-polymer ligand.
+*   The user-provided CCD entry should include the expected backbone atoms and
+    bond graph for the residue, adjusted for the residue position in the polymer
+    chain. E.g. atoms and bond graphs for the mid-chain residue and terminal
+    residue may differ.
+
+The same principle applies to RNA and DNA chains. This workflow is useful for
+modeling non-canonical amino acids or nucleotides in the context of polymer
+chains. By contrast, external covalent ligands should generally be modeled as
+ligand entities plus `bondedAtomPairs`.
+
 ### Conformer Generation
 
 The data pipeline attempts to generate a conformer for ligands using RDKit. The
@@ -717,20 +819,27 @@ increasinging the number of RDKit conformer iterations using the
 
 ### User-provided CCD Format
 
-The user-provided CCD must be passed in the `userCCD` field (in the root of the
-input JSON) as a string. Note that JSON doesn't allow newlines within strings,
-so newline characters (`\n`) must be used to delimit lines. Single rather than
-double quotes should also be used around strings like the chemical formula.
+The user-provided CCD must be passed either:
+
+*   In the `userCCD` field (in the root of the input JSON) as a string. Note
+    that JSON doesn't allow newlines within strings, so newline characters
+    (`\n`) must be used to delimit lines. Single rather than double quotes
+    should also be used around strings like the chemical formula.
+*   In the `userCCDPath` field, as a path to a file that contains the
+    user-provided chemical components dictionary. The path can be either
+    absolute, or relative to the input JSON path. The file must be in the
+    [CCD mmCIF format](https://www.wwpdb.org/data/ccd#mmcifFormat), and could be
+    either plain text, or compressed using gzip, xz, or zstd.
 
 The main pieces of information used are the atom names and elements, bonds, and
 also the ideal coordinates (`pdbx_model_Cartn_{x,y,z}_ideal`) which essentially
 serve as a structural template for the ligand if RDKit fails to generate
 conformers for that ligand.
 
-The `userCCD` can also be used to redefine standard chemical components in the
-CCD. This can be useful if you need to redefine the ideal coordinates.
+The user-provided CCD can also be used to redefine standard chemical components
+in the CCD. This can be useful if you need to redefine the ideal coordinates.
 
-Below is an example `userCCD` redefining component X7F, which serves to
+Below is an example user-provided CCD redefining component X7F, which serves to
 illustrate the required sections. For readability purposes, newlines have not
 been replaced by `\n`.
 
@@ -834,7 +943,9 @@ to the model, but they are necessary for the data pipeline to run – see the
 *   `_chem_comp_atom.type_symbol`: Atom element type.
 *   `_chem_comp_atom.charge`: Atom charge.
 *   `_chem_comp_atom.pdbx_leaving_atom_flag`: Optional flag determining whether
-    this is a leaving atom. If unset, assumed to be no (`N`) for all atoms.
+    this is a leaving atom. If unset, assumed to be no (`N`) for all atoms. Note
+    that this flag does not decide which atoms are removed when the component is
+    bonded to another residue.
 *   `_chem_comp_atom.pdbx_model_Cartn_x_ideal`: Ideal x coordinate.
 *   `_chem_comp_atom.pdbx_model_Cartn_y_ideal`: Ideal y coordinate.
 *   `_chem_comp_atom.pdbx_model_Cartn_z_ideal`: Ideal z coordinate.
@@ -886,7 +997,9 @@ certain fields and the sequences are not biologically meaningful.
           {"ptmType": "HY3", "ptmPosition": 1},
           {"ptmType": "P1L", "ptmPosition": 5}
         ],
+        "description": "10-residue protein with 2 modifications",
         "unpairedMsa": ...,
+        "pairedMsa": ""
       }
     },
     {
@@ -948,7 +1061,6 @@ certain fields and the sequences are not biologically meaningful.
   ],
   "userCCD": ...,
   "dialect": "alphafold3",
-  "version": 2
+  "version": 4
 }
-
 ```

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -22,6 +31,8 @@ import graphlib
 import typing
 from typing import Any, Protocol, Self, TypeAlias, TypeVar, overload
 
+from alphafold3.cpp import indexing
+from alphafold3.cpp import membership
 from alphafold3.cpp import string_array
 import numpy as np
 
@@ -31,7 +42,7 @@ FilterPredicate: TypeAlias = (
     TableEntry
     | Iterable[Any]  # Workaround for b/326384670. Tighten once fixed.
     | Callable[[Any], bool]  # Workaround for b/326384670. Tighten once fixed.
-    | Callable[[np.ndarray], bool]
+    | Callable[[np.ndarray], bool | np.ndarray]
 )
 
 
@@ -43,6 +54,90 @@ class RowLookup(Protocol):
       column_name_map: Mapping[str, str] | None = None,
   ) -> Mapping[str, Any]:
     ...
+
+
+def _as_bool_mask(mask_or_scalar: Any, *, size: int) -> np.ndarray:
+  """Coerces a scalar or 1D predicate result into a `(size,)` bool mask."""
+  mask = np.asarray(mask_or_scalar, dtype=bool)
+  return mask if mask.shape == (size,) else np.broadcast_to(mask, (size,))
+
+
+def _eval_callable_predicate(
+    col_arr: np.ndarray,
+    predicate: (
+        Callable[[Any], bool] | Callable[[np.ndarray], bool | np.ndarray]
+    ),
+    *,
+    apply_per_element: bool,
+) -> np.ndarray:
+  """Evaluates a per-element or vectorized callable predicate into a mask."""
+  size = col_arr.shape[0]
+  if apply_per_element:
+    # Cast via `bool(...)` so non-bool truthy/sequence returns match `np.array`.
+    return np.fromiter(
+        (bool(predicate(elem)) for elem in col_arr), dtype=bool, count=size
+    )
+  pred_fn = typing.cast(Callable[[np.ndarray], bool | np.ndarray], predicate)
+  return _as_bool_mask(pred_fn(col_arr), size=size)
+
+
+def _validate_filter_values(
+    col_dtype: np.dtype, target_vals: Sequence[Any], *, col_name: str
+) -> None:
+  """Raises ValueError if target values are incompatible with `col_dtype`."""
+  if col_dtype == object or isinstance(col_dtype, np.dtypes.StringDType):
+    expected_dtype = None
+  elif np.issubdtype(col_dtype, np.number):
+    expected_dtype = np.number
+  elif np.issubdtype(col_dtype, np.character):
+    expected_dtype = np.character
+  else:
+    return
+  for target_val in target_vals:
+    if not (
+        isinstance(target_val, str) or target_val is None
+        if expected_dtype is None
+        else np.issubdtype(np.asarray(target_val).dtype, expected_dtype)
+    ):
+      raise ValueError(
+          f'Cannot filter column {col_name} (with type {col_dtype}) by value'
+          f' {target_val} (with type {type(target_val)}).'
+      )
+
+
+def _eval_value_predicate(
+    col_arr: np.ndarray, predicate: Any, *, col_name: str
+) -> np.ndarray:
+  """Evaluates a scalar or multi-value equality predicate into a bool mask."""
+  # Strings are Iterable, so treat `str` predicates as a single scalar value.
+  if isinstance(predicate, Iterable) and not isinstance(predicate, str):
+    target_vals = tuple(predicate)
+  else:
+    target_vals = (predicate,)
+  col_dtype = col_arr.dtype
+  _validate_filter_values(col_dtype, target_vals, col_name=col_name)
+
+  size = col_arr.shape[0]
+  if not target_vals or size == 0:
+    return np.zeros((size,), dtype=bool)
+  if col_dtype == object:
+    return membership.isin(col_arr, set(target_vals))
+  if len(target_vals) == 1:
+    return _as_bool_mask(col_arr == target_vals[0], size=size)
+  if col_dtype in (np.int64, np.int32) and all(
+      isinstance(v, (int, np.integer)) for v in target_vals
+  ):
+    return membership.isin(col_arr, set(target_vals))
+
+  field_mask = np.zeros((size,), dtype=bool)
+  for target_val in target_vals:
+    np.logical_or(field_mask, col_arr == target_val, out=field_mask)
+  return field_mask
+
+
+def _take_rows(col_arr: np.ndarray, selector: np.ndarray | slice) -> np.ndarray:
+  """Selects rows along the last axis; 1D columns skip NumPy's N-D index path."""
+  return col_arr[selector] if col_arr.ndim == 1 else col_arr[..., selector]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -78,6 +173,35 @@ class Table:
           f' {set(self.key[self.key < 0])}'
       )
     self.key.flags.writeable = False  # Make key immutable.
+
+  @classmethod
+  def _from_validated_columns(
+      cls, columns: Iterable[tuple[str, np.ndarray]]
+  ) -> Self:
+    """Constructs a Table from row slices of an already-validated Table.
+
+    Row-slicing an already-validated Table preserves column names, equal row
+    counts, non-negative keys, and finite values, so only immutability needs to
+    be re-applied on the newly allocated column arrays.
+
+    Args:
+      columns: Iterable of `(column_name, sliced_array)` pairs.
+
+    Returns:
+      A new immutable Table instance of `cls`.
+    """
+    instance = cls.__new__(cls)
+    for col_name, col in columns:
+      col.flags.writeable = False
+      object.__setattr__(instance, col_name, col)
+    return instance
+
+  def _take(self, selector: np.ndarray) -> Self:
+    """Returns the rows picked by an index array or boolean mask."""
+    return self._from_validated_columns(
+        (col, _take_rows(col_arr, selector))
+        for col, col_arr in self.items.items()
+    )
 
   def __getstate__(self) -> dict[str, Any]:
     """Returns members with cached properties removed for pickling."""
@@ -126,21 +250,81 @@ class Table:
 
   def apply_array(self, arr: np.ndarray) -> Self:
     """Returns a sliced table using a key (!= index) array or a boolean mask."""
-    if arr.dtype == bool and np.all(arr):
+    if arr.dtype != bool:
+      return self._take(indexing.index_of(arr, self.key))
+    if arr.shape != (self.size,):
+      return self._take(arr)
+    if (indices := indexing.nonzero_indices(arr)) is None:
       return self  # Shortcut: No-op, so just return.
-
-    return self.copy_and_update(**{
-        column_name: self.apply_array_to_column(column_name, arr)
-        for column_name in self.columns
-    })
+    return self._take(indices)
 
   def apply_index(self, index_arr: np.ndarray) -> Self:
     """Returns a sliced table using an index (!= key) array."""
     if index_arr.dtype == bool:
       raise ValueError('The index array must not be a boolean mask.')
 
-    return self.copy_and_update(
-        **{col: self.get_column(col)[..., index_arr] for col in self.columns}
+    if self.size == 0 and index_arr.size == 0:
+      return self  # Shortcut: No-op, so just return.
+
+    if (
+        # Perform cheap checks first.
+        len(index_arr) == self.size
+        and index_arr[0] == 0
+        and index_arr[-1] == self.size - 1
+        # Then do the full expensive check.
+        and np.array_equal(index_arr, np.arange(self.size, dtype=np.int64))
+    ):
+      return self  # Shortcut: No-op, so just return.
+
+    return self._take(index_arr)
+
+  def slice_range(self, *, start: int, end: int) -> Self:
+    """Returns a Table sliced to the contiguous `[start, end)` row range.
+
+    Proper slices copy column arrays so small slices never retain NumPy views
+    pinning the parent Table's memory.
+
+    Args:
+      start: Inclusive start row index (`0 <= start <= end`).
+      end: Exclusive end row index (`start <= end <= self.size`).
+
+    Returns:
+      `self` when `[start, end)` covers the entire table; otherwise a new
+      immutable `Table` containing rows `[start, end)`.
+
+    Raises:
+      ValueError: If `start` or `end` is out of `[0, self.size]` or
+        `start > end`.
+    """
+    if not 0 <= start <= end <= self.size:
+      raise ValueError(
+          f'Invalid slice range [{start}, {end}) for table of size {self.size}.'
+      )
+    if start == 0 and end == self.size:
+      return self
+    return self._from_validated_columns(
+        (col, (arr[start:end] if arr.ndim == 1 else arr[..., start:end]).copy())
+        for col, arr in self.items.items()
+    )
+
+  def slice_spans(self, starts: np.ndarray, ends: np.ndarray) -> Self:
+    """Returns a Table sliced to non-overlapping sorted `[start, end)` spans."""
+    spans: list[slice] = []
+    for start, end in zip(starts.tolist(), ends.tolist(), strict=True):
+      if start >= end:
+        continue
+      if spans and spans[-1].stop == start:
+        spans[-1] = slice(spans[-1].start, end)
+      else:
+        spans.append(slice(start, end))
+
+    if not spans:
+      return self.slice_range(start=0, end=0)
+    if len(spans) == 1:
+      return self.slice_range(start=spans[0].start, end=spans[0].stop)
+    return self._from_validated_columns(
+        (col, np.concatenate([_take_rows(arr, s) for s in spans], axis=-1))
+        for col, arr in self.items.items()
     )
 
   def apply_array_to_column(
@@ -149,10 +333,21 @@ class Table:
       arr: np.ndarray,
   ) -> np.ndarray:
     """Returns a sliced column array using a key array or a boolean mask."""
+    col_arr = self.get_column(column_name)
     if arr.dtype == bool:
-      return self.get_column(column_name)[..., arr]
-    else:
-      return self.get_column(column_name)[..., self.index_by_key[arr]]
+      return _take_rows(col_arr, arr)
+    # Fast path: gather 1D native-endian aligned C-contiguous POD/object columns
+    # directly in C++ without allocating an intermediate row-index array.
+    if (
+        col_arr.ndim == 1
+        and col_arr.flags.c_contiguous
+        and col_arr.flags.aligned
+        and col_arr.dtype.isnative
+        and col_arr.dtype.kind in 'biufO'
+        and col_arr.dtype.itemsize <= 8
+    ):
+      return indexing.take_by_key(col_arr, arr, self.key)
+    return _take_rows(col_arr, indexing.index_of(arr, self.key))
 
   def get_value_by_index(self, column_name: str, index: int) -> Any:
     return self.get_column(column_name)[index]
@@ -247,16 +442,14 @@ class Table:
         that the foreign keys point into. If provided, then the yielded rows
         will include data from the foreign tables at the appropriate key.
     """
-    if row_keys is not None:
-      row_indices = self.index_by_key[row_keys]
-    else:
-      row_indices = range(self.size)
-    for i in row_indices:
+    for i in (
+        range(self.size)
+        if row_keys is None
+        else indexing.index_of(row_keys, self.key)
+    ):
       row = self.get_row_by_index(i, column_name_map=column_name_map)
       for key_col, table in table_by_foreign_key_col.items():
-        foreign_key = self[key_col][i]
-        foreign_row = table.get_row_by_key(foreign_key)
-        row.update(foreign_row)
+        row.update(table.get_row_by_key(self[key_col][i]))
       yield row
 
   def with_column_names(
@@ -285,50 +478,34 @@ class Table:
       implies there is no filtering required, and is used where possible
       instead of an all-True array to save time and space.
     """
-    if mask is None:
-      if not predicate_by_col:
-        return None
-      else:
-        mask = np.ones((self.size,), dtype=bool)
-    else:
+    if mask is not None:
       if mask.shape != (self.size,):
         raise ValueError(
             f'mask must have shape ({self.size},). Got: {mask.shape}.'
         )
       if mask.dtype != bool:
         raise ValueError(f'mask must have dtype bool. Got: {mask.dtype}.')
+    if not predicate_by_col:
+      return mask
 
+    result_mask: np.ndarray | None = mask
     for col, predicate in predicate_by_col.items():
-      if self[col].ndim > 1:
+      col_arr = self.get_column(col)
+      if col_arr.ndim > 1:
         raise ValueError(
             f'Cannot filter by column {col} with more than 1 dimension.'
         )
-
-      callable_predicates = []
-      if not callable(predicate):
-        if isinstance(predicate, Iterable) and not isinstance(predicate, str):
-          target_vals = predicate
-        else:
-          target_vals = [predicate]
-        for target_val in target_vals:
-          callable_predicates.append(lambda x, target=target_val: x == target)
+      if callable(predicate):
+        field_mask = _eval_callable_predicate(
+            col_arr, predicate, apply_per_element=apply_per_element
+        )
       else:
-        callable_predicates.append(predicate)
-
-      field_mask = np.zeros_like(mask)
-      for callable_predicate in callable_predicates:
-        if not apply_per_element:
-          callable_predicate = typing.cast(
-              Callable[[np.ndarray], bool], callable_predicate
-          )
-          predicate_result = callable_predicate(self.get_column(col))
-        else:
-          predicate_result = np.array(
-              [callable_predicate(elem) for elem in self.get_column(col)]
-          )
-        np.logical_or(field_mask, predicate_result, out=field_mask)
-      np.logical_and(mask, field_mask, out=mask)  # Update in-place.
-    return mask
+        field_mask = _eval_value_predicate(col_arr, predicate, col_name=col)
+      # Allocate `&` rather than mutating caller `mask` or callable views.
+      result_mask = (
+          field_mask if result_mask is None else result_mask & field_mask
+      )
+    return result_mask
 
   def filter(
       self,
@@ -381,9 +558,9 @@ class Table:
       if not invert:
         return self
       else:
-        return self[np.array((), dtype=np.int64)]
+        return self[np.array((), dtype=np.int64)]  # pyrefly: ignore[bad-return]
     else:
-      return self[~filter_mask if invert else filter_mask]
+      return self[~filter_mask if invert else filter_mask]  # pyrefly: ignore[bad-return]
 
   def _validate_keys_are_column_names(self, keys: Collection[str]) -> None:
     """Raises an error if any of the keys are not column names."""
@@ -478,7 +655,7 @@ class Database(abc.ABC):
   @abc.abstractmethod
   def copy_and_update(
       self: _DatabaseT,
-      **new_field_by_field_name: ...,
+      **new_field_by_field_name,
   ) -> _DatabaseT:
     """Returns a copy of this database with the specified changes applied."""
 

@@ -1,0 +1,18 @@
+/* Scheme has a transparent background: keep it white in dark mode. */
+.af3x-scheme { background: #fff; border-radius: 0.4rem; padding: 0.5rem; box-sizing: border-box; }
+
+/* Left menu: dark bold section headings, indented pages, bar on the current page. */
+.md-nav--primary .md-nav__item--section { margin: 1.2em 0; }
+.md-nav--primary .md-nav__item--section > .md-nav__link,
+.md-nav--primary .md-nav__item--section > .md-nav__link[for] {
+  color: var(--md-default-fg-color); font-size: 0.75rem;
+}
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary .md-nav__item--section > .md-nav { margin-left: 0.6rem; }
+}
+.md-nav--primary .md-nav__item--active > a.md-nav__link--active {
+  box-shadow: inset 3px 0 0 var(--md-primary-fg-color); padding-left: 0.6rem; font-weight: 700;
+}
+
+/* FAQ questions: no extra gap between collapsed blocks. */
+.md-typeset details.question { margin: 0.5em 0; }

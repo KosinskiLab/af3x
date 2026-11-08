@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -538,7 +547,7 @@ class Templates:
             pdb_id=pdb_id,
             auth_chain_id=auth_chain_id,
             hmmsearch_sequence=hit_seq,
-            structure_sequence=sequence,
+            structure_sequence=sequence,  # pyrefly: ignore[bad-argument-type]
             query_sequence=query_sequence,
             unresolved_res_indices=unresolved_indices,
             start_index=start - 1,  # Raw value is residue number, not index.
@@ -561,7 +570,7 @@ class Templates:
           max_hits=filter_config.max_hits,
       )
 
-    return Templates(
+    return Templates(  # pyrefly: ignore[bad-return]
         query_sequence=query_sequence,
         query_release_date=query_release_date,
         hits=hits,
@@ -633,7 +642,7 @@ class Templates:
         deduplicate_sequences=deduplicate_sequences,
         max_hits=max_hits,
     )
-    return Templates(
+    return Templates(  # pyrefly: ignore[bad-return]
         query_sequence=self.query_sequence,
         query_release_date=self.query_release_date,
         hits=filtered_hits,
@@ -814,7 +823,7 @@ def _parse_hit_metadata(
       chain_auth_asym_id=auth_chain_id
   ).unresolved_residues.id
 
-  return release_date, sequence, unresolved_res_ids
+  return release_date, sequence, unresolved_res_ids  # pyrefly: ignore[bad-return]
 
 
 def get_polymer_features(
@@ -839,14 +848,22 @@ def get_polymer_features(
   Raises:
     ValueError: If the input structure contains more than just a single chain.
   """
-  if len(chain.polymer_auth_asym_id_to_label_asym_id()) != 1:
-    raise ValueError('The structure must be filtered to a single chain.')
-
   if chain.name is None:
-    raise ValueError('The structure must have a name.')
+    raise ValueError('Template structure must have a name.')
 
   if chain.release_date is None:
-    raise ValueError('The structure must have a release date.')
+    raise ValueError(
+        f'Template structure {chain.name} must have a release date. You can do'
+        ' this by setting "_pdbx_audit_revision_history.revision_date" in the'
+        ' template mmCIF to a date in the ISO-8601 format (e.g. 1989-11-17).'
+    )
+
+  num_polymer_chains = len(chain.polymer_auth_asym_id_to_label_asym_id())
+  if num_polymer_chains != 1:
+    raise ValueError(
+        f'Template structure {chain.name} must be filtered to a single polymer'
+        f' chain but got a structure with {num_polymer_chains} polymer chains.'
+    )
 
   auth_chain_id, label_chain_id = next(
       iter(chain.polymer_auth_asym_id_to_label_asym_id().items())
@@ -854,9 +871,11 @@ def get_polymer_features(
   chain_sequence = chain.chain_single_letter_sequence()[label_chain_id]
 
   polymer = _POLYMERS[chain_poly_type]
-  positions, positions_mask = chain.to_res_arrays(
+  res_arrays = chain.to_res_arrays(
       include_missing_residues=True, atom_order=polymer.atom_order
   )
+  positions = res_arrays.atom_positions
+  positions_mask = res_arrays.atom_mask
   template_all_atom_positions = np.zeros(
       (query_sequence_length, polymer.num_atom_types, 3), dtype=np.float64
   )
@@ -898,12 +917,12 @@ def _get_ligand_features(
     idxs = np.where(ligand_struc.chain_id == ligand_chain_id)[0]
     if idxs.shape[0]:
       ligand_features[ligand_chain_id] = {
-          'ligand_atom_positions': ligand_struc.coords[idxs, :].astype(
-              np.float32
+          'ligand_atom_positions': (
+              ligand_struc.coords[idxs, :].astype(np.float32)
           ),
           'ligand_atom_names': ligand_struc.atom_name[idxs].astype(object),
-          'ligand_atom_occupancies': ligand_struc.atom_occupancy[idxs].astype(
-              np.float32
+          'ligand_atom_occupancies': (
+              ligand_struc.atom_occupancy[idxs].astype(np.float32)
           ),
           'ccd_id': ligand_struc.res_name[idxs][0].encode(),
       }
@@ -929,7 +948,7 @@ def package_template_features(
   stacked_features = {}
   for k, v in features.items():
     if k in _POLYMER_FEATURES:
-      v = np.stack(v, axis=0) if v else np.array([], dtype=_POLYMER_FEATURES[k])
+      v = np.stack(v, axis=0) if v else np.array([], dtype=_POLYMER_FEATURES[k])  # pyrefly: ignore[no-matching-overload]
     stacked_features[k] = v
 
   return stacked_features
@@ -958,6 +977,7 @@ def run_hmmsearch_with_a3m(
       binary_path=hmmsearch_config.hmmsearch_binary_path,
       hmmbuild_binary_path=hmmsearch_config.hmmbuild_binary_path,
       database_path=_resolve_path(database_path),
+      n_cpu=hmmsearch_config.n_cpu,
       e_value=hmmsearch_config.e_value,
       inc_e=hmmsearch_config.inc_e,
       dom_e=hmmsearch_config.dom_e,
@@ -969,5 +989,5 @@ def run_hmmsearch_with_a3m(
       filter_max=hmmsearch_config.filter_max,
   )
   # STO enables us to annotate query non-gap columns as reference columns.
-  sto = parsers.convert_a3m_to_stockholm(a3m, max_a3m_query_sequences)
+  sto = parsers.convert_a3m_to_stockholm(a3m, max_a3m_query_sequences)  # pyrefly: ignore[bad-argument-type]
   return searcher.query_with_sto(sto, model_construction='hand')

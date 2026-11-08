@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -10,8 +19,6 @@
 
 """Prepare PDB structure for training or inference."""
 
-from typing import Any
-
 from absl import logging
 from alphafold3 import structure
 from alphafold3.constants import chemical_component_sets
@@ -19,8 +26,6 @@ from alphafold3.constants import chemical_components
 from alphafold3.constants import mmcif_names
 from alphafold3.model.atom_layout import atom_layout
 from alphafold3.model.pipeline import inter_chain_bonds
-from alphafold3.model.scoring import covalent_bond_cleaning
-from alphafold3.structure import sterics
 import numpy as np
 
 
@@ -32,11 +37,12 @@ def _get_leaving_atom_mask(
     chain_type: str,
     res_id: int,
     res_name: str,
+    fix_standalone_glycans: bool,
 ) -> np.ndarray:
   """Updates a drop_leaving_atoms mask with new leaving atom locations."""
   bonded_atoms = atom_layout.get_bonded_atoms(
-      polymer_ligand_bonds,
-      ligand_ligand_bonds,
+      polymer_ligand_bonds,  # pyrefly: ignore[bad-argument-type]
+      ligand_ligand_bonds,  # pyrefly: ignore[bad-argument-type]
       res_id,
       chain_id,
   )
@@ -48,6 +54,7 @@ def _get_leaving_atom_mask(
       is_end_terminus=False,
       bonded_atoms=bonded_atoms,
       drop_ligand_leaving_atoms=True,
+      fix_standalone_glycans=fix_standalone_glycans,
   )
   # Default mask where everything is false, which equates to being kept.
   drop_atom_filter_atoms = struc.chain_id != struc.chain_id
@@ -70,9 +77,7 @@ def clean_structure(
     ccd: chemical_components.Ccd,
     *,
     drop_missing_sequence: bool,
-    filter_clashes: bool,
     drop_non_standard_atoms: bool,
-    filter_crystal_aids: bool,
     filter_waters: bool,
     filter_hydrogens: bool,
     filter_leaving_atoms: bool,
@@ -80,17 +85,15 @@ def clean_structure(
     covalent_bonds_only: bool,
     remove_polymer_polymer_bonds: bool,
     remove_bad_bonds: bool,
-    remove_nonsymmetric_bonds: bool,
-) -> tuple[structure.Structure, dict[str, Any]]:
-  """Cleans structure.
+    fix_standalone_glycans: bool,
+) -> structure.Structure:
+  """Returns a cleaned version of the input structure.
 
   Args:
     struc: Structure to clean.
     ccd: The chemical components dictionary.
     drop_missing_sequence: Whether to drop chains without specified sequences.
-    filter_clashes: Whether to drop clashing chains.
     drop_non_standard_atoms: Whether to drop non CCD standard atoms.
-    filter_crystal_aids: Whether to drop ligands in the crystal aid set.
     filter_waters: Whether to drop water chains.
     filter_hydrogens: Whether to drop hyrdogen atoms.
     filter_leaving_atoms: Whether to drop leaving atoms based on heuristics.
@@ -99,43 +102,19 @@ def clean_structure(
     covalent_bonds_only: Only include covalent bonds.
     remove_polymer_polymer_bonds: Remove polymer-polymer bonds.
     remove_bad_bonds: Whether to remove badly bonded ligands.
-    remove_nonsymmetric_bonds: Whether to remove nonsymmetric polymer-ligand
-      bonds from symmetric polymer chains.
-
-  Returns:
-    Tuple of structure and metadata dict. The metadata dict has
-    information about what was cleaned from the original.
+    fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+      out leaving atoms from glycan ligands even if they were not bonded to
+      anything ("standalone" glycans). Setting this flag to True fixes this
+      undesirable behavior, but moves away from the regime where AlphaFold 3 was
+      trained and evaluated. This has only an effect if filter_leaving_atoms is
+      True.
   """
-
-  metadata = {}
-  # Crop crystallization aids.
-  if (
-      filter_crystal_aids
-      and struc.structure_method in mmcif_names.CRYSTALLIZATION_METHODS
-  ):
-    struc = struc.filter_out(
-        res_name=chemical_component_sets.COMMON_CRYSTALLIZATION_AIDS
-    )
 
   # Drop chains without specified sequences.
   if drop_missing_sequence:
     chains_with_unk_sequence = struc.find_chains_with_unknown_sequence()
-    num_with_unk_sequence = len(chains_with_unk_sequence)
     if chains_with_unk_sequence:
       struc = struc.filter_out(chain_id=chains_with_unk_sequence)
-  else:
-    num_with_unk_sequence = 0
-  metadata['num_with_unk_sequence'] = num_with_unk_sequence
-
-  # Remove intersecting chains.
-  if filter_clashes and struc.num_chains > 1:
-    clashing_chains = sterics.find_clashing_chains(struc)
-    if clashing_chains:
-      struc = struc.filter_out(chain_id=clashing_chains)
-  else:
-    clashing_chains = []
-  metadata['num_clashing_chains_removed'] = len(clashing_chains)
-  metadata['chains_removed'] = clashing_chains
 
   # Drop non-standard atoms
   if drop_non_standard_atoms:
@@ -167,8 +146,10 @@ def clean_structure(
         *chemical_component_sets.GLYCAN_LINKING_LIGANDS,
     }
     # If only glycan ligands and no O1 atoms, we can do parallel drop.
+    # If we need to keep O1 for standalone glycans, iterate over each residue.
     if (
-        only_glycan_ligands_for_leaving_atoms
+        not fix_standalone_glycans
+        and only_glycan_ligands_for_leaving_atoms
         and (not (ligand_ligand_bonds.atom_name == 'O1').any())
         and (not (polymer_ligand_bonds.atom_name == 'O1').any())
     ):
@@ -192,23 +173,22 @@ def clean_structure(
               chain_type=res['chain_type'],
               res_id=res['res_id'],
               res_name=res_name,
+              fix_standalone_glycans=fix_standalone_glycans,
           )
           drop_leaving_atoms_all = np.logical_or(
               drop_leaving_atoms_all, drop_atom_filter
           )
 
-    num_atoms_before = struc.num_atoms
-    struc = struc.filter_out(drop_leaving_atoms_all)
-    num_atoms_after = struc.num_atoms
-
-    if num_atoms_before > num_atoms_after:
-      logging.error(
-          'Dropped %s atoms from GT struc: chain_id %s res_id %s res_name %s',
-          num_atoms_before - num_atoms_after,
-          struc.chain_id,
-          struc.res_id,
-          struc.res_name,
+    if np.any(drop_leaving_atoms_all):
+      logging.info(
+          'Dropped %d atoms: chain_id %s, res_id %s, res_name %s, atom_name %s',
+          struc.num_atoms - np.sum(~drop_leaving_atoms_all),
+          struc.chain_id[drop_leaving_atoms_all],
+          struc.res_id[drop_leaving_atoms_all],
+          struc.res_name[drop_leaving_atoms_all],
+          struc.atom_name[drop_leaving_atoms_all],
       )
+    struc = struc.filter_out(drop_leaving_atoms_all)
 
   # Can filter by bond type without having to iterate over bonds.
   if struc.bonds and covalent_bonds_only:
@@ -217,7 +197,7 @@ def clean_structure(
       new_bonds = struc.bonds[is_covalent]
     else:
       new_bonds = structure.Bonds.make_empty()
-    struc = struc.copy_and_update(bonds=new_bonds)
+    struc = struc.copy_and_update(bonds=new_bonds)  # pyrefly: ignore[bad-argument-type]
 
   # Other bond filters require iterating over individual bonds.
   if struc.bonds and (remove_bad_bonds or remove_polymer_polymer_bonds):
@@ -266,29 +246,9 @@ def clean_structure(
         new_bonds = struc.bonds[np.array(include_bond, dtype=bool)]
       else:
         new_bonds = structure.Bonds.make_empty()
-      struc = struc.copy_and_update(bonds=new_bonds)
+      struc = struc.copy_and_update(bonds=new_bonds)  # pyrefly: ignore[bad-argument-type]
 
-  if struc.bonds and remove_nonsymmetric_bonds:
-    # Check for asymmetric polymer-ligand bonds and remove if these exist.
-    polymer_ligand_bonds = inter_chain_bonds.get_polymer_ligand_bonds(
-        struc,
-        only_glycan_ligands=False,
-    )
-    if polymer_ligand_bonds:
-      if covalent_bond_cleaning.has_nonsymmetric_bonds_on_symmetric_polymer_chains(
-          struc, polymer_ligand_bonds
-      ):
-        from_atom_idxs, dest_atom_idxs = struc.bonds.get_atom_indices(
-            struc.atom_key
-        )
-        poly_chain_types = list(mmcif_names.POLYMER_CHAIN_TYPES)
-        is_polymer_bond = np.logical_or(
-            np.isin(struc.chain_type[from_atom_idxs], poly_chain_types),
-            np.isin(struc.chain_type[dest_atom_idxs], poly_chain_types),
-        )
-        struc = struc.copy_and_update(bonds=struc.bonds[~is_polymer_bond])
-
-  return struc, metadata
+  return struc
 
 
 def create_empty_output_struc_and_layout(
@@ -300,6 +260,7 @@ def create_empty_output_struc_and_layout(
     polymer_ligand_bonds: atom_layout.AtomLayout | None = None,
     ligand_ligand_bonds: atom_layout.AtomLayout | None = None,
     drop_ligand_leaving_atoms: bool = False,
+    fix_standalone_glycans: bool = False,
 ) -> tuple[structure.Structure, atom_layout.AtomLayout]:
   """Make zero-coordinate structure from all physical residues.
 
@@ -311,6 +272,8 @@ def create_empty_output_struc_and_layout(
     polymer_ligand_bonds: Bond information for polymer-ligand pairs.
     ligand_ligand_bonds: Bond information for ligand-ligand pairs.
     drop_ligand_leaving_atoms: Flag for handling leaving atoms for ligands.
+    fix_standalone_glycans: If True, standalone glycans are preserved when
+      drop_ligand_leaving_atoms is True.
 
   Returns:
     Tuple of structure with all bonds, physical residues and coordinates set to
@@ -351,6 +314,7 @@ def create_empty_output_struc_and_layout(
       polymer_ligand_bonds=polymer_ligand_bonds,
       ligand_ligand_bonds=ligand_ligand_bonds,
       drop_ligand_leaving_atoms=drop_ligand_leaving_atoms,
+      fix_standalone_glycans=fix_standalone_glycans,
   )
 
   empty_output_struc = atom_layout.make_structure(

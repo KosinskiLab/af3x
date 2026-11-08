@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -34,7 +43,7 @@ class DatabaseConfig:
 
 @dataclasses.dataclass(frozen=True, kw_only=True, slots=True)
 class JackhmmerConfig:
-  """Configuration for a jackhmmer run.
+  """Configuration for Jackhmmer.
 
   Attributes:
       binary_path: Path to the binary of the msa tool.
@@ -42,9 +51,16 @@ class JackhmmerConfig:
       n_cpu: An integer with the number of CPUs to use.
       n_iter: An integer with the number of database search iterations.
       e_value: e-value for the database lookup.
-      z_value: The Z-value representing the number of comparisons done (i.e
-        correct database size) for E-value calculation.
+      z_value: The Z-value representing the database size in number of sequences
+        for E-value and domain E-value calculation. Must be set for sharded
+        databases.
+      dom_z_value: The Z-value representing the database size in number of
+        sequences for domain E-value calculation. Must be set for sharded
+        databases.
       max_sequences: Max sequences to return in MSA.
+      max_parallel_shards: If given, the maximum number of shards to search
+        against in parallel. If None, one Jackhmmer instance will be run per
+        shard. Only applicable if the database is sharded.
   """
 
   binary_path: str
@@ -52,13 +68,15 @@ class JackhmmerConfig:
   n_cpu: int
   n_iter: int
   e_value: float
-  z_value: float | int | None
+  z_value: int | None
+  dom_z_value: int | None
   max_sequences: int
+  max_parallel_shards: int | None = None
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True, slots=True)
 class NhmmerConfig:
-  """Configuration for a nhmmer run.
+  """Configuration for Nhmmer.
 
   Attributes:
       binary_path: Path to the binary of the msa tool.
@@ -67,8 +85,14 @@ class NhmmerConfig:
       database_config: Database configuration.
       n_cpu: An integer with the number of CPUs to use.
       e_value: e-value for the database lookup.
+      z_value: The Z-value representing the database size in megabases for
+        E-value calculation. Allows fractional values. Must be set for sharded
+        databases.
       max_sequences: Max sequences to return in MSA.
       alphabet: The alphabet when building a profile with hmmbuild.
+      max_parallel_shards: If given, the maximum number of shards to search
+        against in parallel. If None, one Nhmmer instance will be run per shard.
+        Only applicable if the database is sharded.
   """
 
   binary_path: str
@@ -77,8 +101,10 @@ class NhmmerConfig:
   database_config: DatabaseConfig
   n_cpu: int
   e_value: float
+  z_value: float | None
   max_sequences: int
   alphabet: str | None
+  max_parallel_shards: int | None = None
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True, slots=True)
@@ -106,11 +132,26 @@ class RunConfig:
 
 @dataclasses.dataclass(frozen=True, kw_only=True, slots=True)
 class HmmsearchConfig:
-  """Configuration for a hmmsearch."""
+  """Configuration for Hmmsearch.
+
+  Attributes:
+    hmmsearch_binary_path: Path to the hmmsearch binary.
+    hmmbuild_binary_path: Path to the hmmbuild binary to build profile from MSA.
+    n_cpu: Number of CPUs to use in Hmmsearch.
+    e_value: E-value for the database lookup.
+    inc_e: E-value for inclusion in the output.
+    dom_e: Domain E-value for the database lookup.
+    incdom_e: Domain E-value for inclusion in the output.
+    alphabet: Alphabet to use for the hmmbuild binary.
+    filter_f1: MSV and biased composition pre-filter.
+    filter_f2: Viterbi pre-filter.
+    filter_f3: Forward pre-filter.
+    filter_max: If true, remove all filters.
+  """
 
   hmmsearch_binary_path: str
   hmmbuild_binary_path: str
-
+  n_cpu: int
   e_value: float
   inc_e: float
   dom_e: float

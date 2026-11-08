@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -14,9 +23,28 @@ import dataclasses
 
 from absl.testing import parameterized
 from alphafold3 import structure
+from alphafold3.common import resources
 from alphafold3.common.testing import data
 import numpy as np
-import tree
+
+_TEST_DATA = data.Data(
+    resources.ROOT / 'test_data/miniature_databases/pdb_mmcif'
+)
+
+
+def read_test_cif_file(filename: str) -> str:
+  return _TEST_DATA.load(f'{filename}.cif')
+
+
+def _flatten_dict_with_path(d, prefix=()):
+  items = []
+  for k, v in sorted(d.items()):
+    path = prefix + (k,)
+    if isinstance(v, dict):
+      items.extend(_flatten_dict_with_path(v, path))
+    else:
+      items.append((path, v))
+  return items
 
 
 class StructureTestCase(parameterized.TestCase):
@@ -24,12 +52,8 @@ class StructureTestCase(parameterized.TestCase):
 
   def assertAuthorNamingSchemeEqual(self, ans1, ans2):  # pylint: disable=invalid-name
     """Walks naming scheme, making sure all elements are equal."""
-    if ans1 is None or ans2 is None:
-      self.assertIsNone(ans1)
-      self.assertIsNone(ans2)
-      return
-    flat_ans1 = dict(tree.flatten_with_path(dataclasses.asdict(ans1)))
-    flat_ans2 = dict(tree.flatten_with_path(dataclasses.asdict(ans2)))
+    flat_ans1 = dict(_flatten_dict_with_path(dataclasses.asdict(ans1)))
+    flat_ans2 = dict(_flatten_dict_with_path(dataclasses.asdict(ans2)))
     for k, v in flat_ans1.items():
       self.assertEqual(v, flat_ans2[k], msg=str(k))
     for k, v in flat_ans2.items():
@@ -37,10 +61,6 @@ class StructureTestCase(parameterized.TestCase):
 
   def assertAllResiduesEqual(self, all_res1, all_res2):  # pylint: disable=invalid-name
     """Walks all residues, making sure alll elements are equal."""
-    if all_res1 is None or all_res2 is None:
-      self.assertIsNone(all_res1)
-      self.assertIsNone(all_res2)
-      return
     self.assertSameElements(all_res1.keys(), all_res2.keys())
     for chain_id, chain_res in all_res1.items():
       self.assertSequenceEqual(chain_res, all_res2[chain_id], msg=chain_id)
@@ -88,10 +108,9 @@ class StructureTestCase(parameterized.TestCase):
   def assertBondsEqual(self, bonds1, bonds2, atom_key1, atom_key2):  # pylint: disable=invalid-name
     """Checks whether two Bonds objects are considered equal."""
     # An empty bonds table is functionally equivalent to an empty bonds table.
-    # NB: this can only ever be None in structure v1.
-    if bonds1 is None or not bonds1.size or bonds2 is None or not bonds2.size:
-      self.assertTrue(bonds1 is None or not bonds1.size, msg=f'{bonds1=}')
-      self.assertTrue(bonds2 is None or not bonds2.size, msg=f'{bonds2=}')
+    if not bonds1.size or not bonds2.size:
+      self.assertEqual(bonds1.size, 0, msg=f'{bonds1=}')
+      self.assertEqual(bonds1.size, 0, msg=f'{bonds2=}')
       return
 
     ptnr1_indices1, ptnr2_indices1 = bonds1.get_atom_indices(atom_key1)

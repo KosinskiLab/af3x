@@ -1,17 +1,28 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """AlphaFold 3 structure prediction script.
 
-AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+AlphaFold 3 source code is licensed under Apache License, Version 2.0. To view a
+copy of this license, visit http://www.apache.org/licenses/LICENSE-2.0
 
 To request access to the AlphaFold 3 model parameters, follow the process set
 out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -23,13 +34,13 @@ from collections.abc import Callable, Sequence
 import csv
 import dataclasses
 import datetime
+import enum
 import functools
-import multiprocessing
+import io
 import os
-import sys
-import pathlib
 import shutil
 import string
+import sys
 import textwrap
 import time
 import typing
@@ -37,25 +48,27 @@ from typing import overload
 
 from absl import app
 from absl import flags
+from alphafold3.common import af3x_version
 from alphafold3.common import folding_input
 from alphafold3.common import resources
 from alphafold3.constants import chemical_components
 import alphafold3.cpp
 from alphafold3.data import featurisation
 from alphafold3.data import pipeline
-from alphafold3.jax.attention import attention
+from alphafold3.data.tools import shards
 from alphafold3.model import features
 from alphafold3.model import model
 from alphafold3.model import params
 from alphafold3.model import post_processing
 from alphafold3.model.components import utils
+from etils import epath
 import haiku as hk
 import jax
 from jax import numpy as jnp
 import numpy as np
+import tokamax
 
-
-_HOME_DIR = pathlib.Path(os.environ.get('HOME'))
+_HOME_DIR = epath.Path('~').expanduser()
 _DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
 _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
 
@@ -77,23 +90,30 @@ class FlushingStream:
 sys.stdout = FlushingStream(sys.stdout)
 
 
+@enum.unique
+class JaxBackend(enum.StrEnum):
+  CPU = enum.auto()
+  GPU = enum.auto()
+  MPS = enum.auto()  # Apple Metal Performance Shaders (MPS).
+
+
 # Input and output paths.
-_JSON_PATH = flags.DEFINE_string(
+_JSON_PATH = epath.DEFINE_path(
     'json_path',
     None,
     'Path to the input JSON file.',
 )
-_INPUT_DIR = flags.DEFINE_string(
+_INPUT_DIR = epath.DEFINE_path(
     'input_dir',
     None,
     'Path to the directory containing input JSON files.',
 )
-_OUTPUT_DIR = flags.DEFINE_string(
+_OUTPUT_DIR = epath.DEFINE_path(
     'output_dir',
     None,
     'Path to a directory where the results will be saved.',
 )
-MODEL_DIR = flags.DEFINE_string(
+MODEL_DIR = epath.DEFINE_path(
     'model_dir',
     _DEFAULT_MODEL_DIR.as_posix(),
     'Path to the model to use for inference.',
@@ -145,21 +165,41 @@ DB_DIR = flags.DEFINE_multi_string(
     'Path to the directory containing the databases. Can be specified multiple'
     ' times to search multiple directories in order.',
 )
-
 _SMALL_BFD_DATABASE_PATH = flags.DEFINE_string(
     'small_bfd_database_path',
     '${DB_DIR}/bfd-first_non_consensus_sequences.fasta',
     'Small BFD database path, used for protein MSA search.',
+)
+_SMALL_BFD_Z_VALUE = flags.DEFINE_integer(
+    'small_bfd_z_value',
+    None,
+    'The Z-value representing the database size in number of sequences for'
+    ' E-value calculation. Must be set for sharded databases.',
+    lower_bound=0,
 )
 _MGNIFY_DATABASE_PATH = flags.DEFINE_string(
     'mgnify_database_path',
     '${DB_DIR}/mgy_clusters_2022_05.fa',
     'Mgnify database path, used for protein MSA search.',
 )
+_MGNIFY_Z_VALUE = flags.DEFINE_integer(
+    'mgnify_z_value',
+    None,
+    'The Z-value representing the database size in number of sequences for'
+    ' E-value calculation. Must be set for sharded databases.',
+    lower_bound=0,
+)
 _UNIPROT_CLUSTER_ANNOT_DATABASE_PATH = flags.DEFINE_string(
     'uniprot_cluster_annot_database_path',
     '${DB_DIR}/uniprot_all_2021_04.fa',
     'UniProt database path, used for protein paired MSA search.',
+)
+_UNIPROT_CLUSTER_ANNOT_Z_VALUE = flags.DEFINE_integer(
+    'uniprot_cluster_annot_z_value',
+    None,
+    'The Z-value representing the database size in number of sequences for'
+    ' E-value calculation. Must be set for sharded databases.',
+    lower_bound=0,
 )
 _UNIREF90_DATABASE_PATH = flags.DEFINE_string(
     'uniref90_database_path',
@@ -167,22 +207,50 @@ _UNIREF90_DATABASE_PATH = flags.DEFINE_string(
     'UniRef90 database path, used for MSA search. The MSA obtained by '
     'searching it is used to construct the profile for template search.',
 )
+_UNIREF90_Z_VALUE = flags.DEFINE_integer(
+    'uniref90_z_value',
+    None,
+    'The Z-value representing the database size in number of sequences for'
+    ' E-value calculation. Must be set for sharded databases.',
+    lower_bound=0,
+)
 _NTRNA_DATABASE_PATH = flags.DEFINE_string(
     'ntrna_database_path',
     '${DB_DIR}/nt_rna_2023_02_23_clust_seq_id_90_cov_80_rep_seq.fasta',
     'NT-RNA database path, used for RNA MSA search.',
+)
+_NTRNA_Z_VALUE = flags.DEFINE_float(
+    'ntrna_z_value',
+    None,
+    'The Z-value representing the database size in megabases for E-value'
+    ' calculation. Must be set for sharded databases.',
+    lower_bound=0.0,
 )
 _RFAM_DATABASE_PATH = flags.DEFINE_string(
     'rfam_database_path',
     '${DB_DIR}/rfam_14_9_clust_seq_id_90_cov_80_rep_seq.fasta',
     'Rfam database path, used for RNA MSA search.',
 )
+_RFAM_Z_VALUE = flags.DEFINE_float(
+    'rfam_z_value',
+    None,
+    'The Z-value representing the database size in megabases for E-value'
+    ' calculation. Must be set for sharded databases.',
+    lower_bound=0.0,
+)
 _RNA_CENTRAL_DATABASE_PATH = flags.DEFINE_string(
     'rna_central_database_path',
     '${DB_DIR}/rnacentral_active_seq_id_90_cov_80_linclust.fasta',
     'RNAcentral database path, used for RNA MSA search.',
 )
-_PDB_DATABASE_PATH = flags.DEFINE_string(
+_RNA_CENTRAL_Z_VALUE = flags.DEFINE_float(
+    'rna_central_z_value',
+    None,
+    'The Z-value representing the database size in megabases for E-value'
+    ' calculation. Must be set for sharded databases.',
+    lower_bound=0.0,
+)
+_PDB_DATABASE_PATH = epath.DEFINE_path(
     'pdb_database_path',
     '${DB_DIR}/mmcif_files',
     'PDB database directory with mmCIF files path, used for template search.',
@@ -193,33 +261,91 @@ _SEQRES_DATABASE_PATH = flags.DEFINE_string(
     'PDB sequence database path, used for template search.',
 )
 
+
+def _num_cpus_for_msa_tools() -> int:
+  try:
+    # Unfortunately, os.process_cpu_count() is only available in Python 3.13+.
+    num_cpus = len(os.sched_getaffinity(0))
+  except AttributeError:
+    num_cpus = os.cpu_count()  # MacOS doesn't have os.sched_getaffinity().
+  return min(num_cpus if num_cpus is not None else 8, 8)
+
+
 # Number of CPUs to use for MSA tools.
 _JACKHMMER_N_CPU = flags.DEFINE_integer(
     'jackhmmer_n_cpu',
-    min(multiprocessing.cpu_count(), 8),
-    'Number of CPUs to use for Jackhmmer. Default to min(cpu_count, 8). Going'
-    ' beyond 8 CPUs provides very little additional speedup.',
+    _num_cpus_for_msa_tools(),
+    'Number of CPUs to use for Jackhmmer. Defaults to min(cpu_count, 8). Going'
+    ' above 8 CPUs provides very little additional speedup.',
+    lower_bound=0,
+)
+_JACKHMMER_MAX_PARALLEL_SHARDS = flags.DEFINE_integer(
+    'jackhmmer_max_parallel_shards',
+    None,
+    'Maximum number of shards to search against in parallel. If unset, one'
+    ' Jackhmmer instance will be run per shard. Only applicable if the'
+    ' database is sharded.',
+    lower_bound=1,
 )
 _NHMMER_N_CPU = flags.DEFINE_integer(
     'nhmmer_n_cpu',
-    min(multiprocessing.cpu_count(), 8),
-    'Number of CPUs to use for Nhmmer. Default to min(cpu_count, 8). Going'
-    ' beyond 8 CPUs provides very little additional speedup.',
+    _num_cpus_for_msa_tools(),
+    'Number of CPUs to use for Nhmmer. Defaults to min(cpu_count, 8). Going'
+    ' above 8 CPUs provides very little additional speedup.',
+    lower_bound=0,
+)
+_NHMMER_MAX_PARALLEL_SHARDS = flags.DEFINE_integer(
+    'nhmmer_max_parallel_shards',
+    None,
+    'Maximum number of shards to search against in parallel. If unset, one'
+    ' Nhmmer instance will be run per shard. Only applicable if the'
+    ' database is sharded.',
+    lower_bound=1,
+)
+_HMMSEARCH_N_CPU = flags.DEFINE_integer(
+    'hmmsearch_n_cpu',
+    _num_cpus_for_msa_tools(),
+    'Number of CPUs to use for Hmmsearch. Defaults to min(cpu_count, 8). Going'
+    ' above 8 CPUs provides very little additional speedup.',
+    lower_bound=0,
 )
 
-# Template search configuration.
+# Data pipeline configuration.
+_RESOLVE_MSA_OVERLAPS = flags.DEFINE_bool(
+    'resolve_msa_overlaps',
+    True,
+    'Whether to deduplicate unpaired MSA against paired MSA. The default'
+    ' behaviour matches the method described in the AlphaFold 3 paper. Set this'
+    ' to false if providing custom paired MSA using the unpaired MSA field to'
+    ' keep it exactly as is as deduplication against the paired MSA could break'
+    ' the manually crafted pairing between MSA sequences.',
+)
 _MAX_TEMPLATE_DATE = flags.DEFINE_string(
     'max_template_date',
     '2021-09-30',  # By default, use the date from the AlphaFold 3 paper.
-    'Maximum template release date to consider. Format: YYYY-MM-DD. All '
-    'templates released after this date will be ignored.',
+    'Maximum template release date to consider. Format: YYYY-MM-DD. All'
+    ' templates released after this date will be ignored. Controls also whether'
+    ' to allow use of model coordinates for a chemical component from the CCD'
+    ' if RDKit conformer generation fails and the component does not have ideal'
+    ' coordinates set. Only for components that have been released before this'
+    ' date the model coordinates can be used as a fallback.',
 )
-
 _CONFORMER_MAX_ITERATIONS = flags.DEFINE_integer(
     'conformer_max_iterations',
     None,  # Default to RDKit default parameters value.
     'Optional override for maximum number of iterations to run for RDKit '
     'conformer search.',
+    lower_bound=0,
+)
+_FIX_STANDALONE_GLYCANS = flags.DEFINE_bool(
+    'fix_standalone_glycans',
+    False,
+    'AlphaFold 3 model training and evaluation filtered out leaving atoms from'
+    ' glycan ligands even if they were not bonded to anything ("standalone"'
+    ' glycans). Setting this flag to True fixes this undesirable behavior, but'
+    ' moves away from the regime where AlphaFold 3 was trained and evaluated.'
+    ' It is recommended to set this flag to True when using the AF3-LA'
+    ' parameters.',
 )
 
 # JAX inference performance tuning.
@@ -231,15 +357,30 @@ _JAX_COMPILATION_CACHE_DIR = flags.DEFINE_string(
 _GPU_DEVICE = flags.DEFINE_integer(
     'gpu_device',
     0,
-    'Optional override for the GPU device to use for inference. Defaults to the'
-    ' 1st GPU on the system. Useful on multi-GPU systems to pin each run to a'
-    ' specific GPU.',
+    'Optional override for the JAX device to use for inference. Uses zero-based'
+    ' indexing. Defaults to the 0th device on the system. Useful on multi-GPU'
+    ' systems to pin each run to a specific GPU. Note that if GPUs are already'
+    ' pre-filtered by the environment (e.g. by using CUDA_VISIBLE_DEVICES),'
+    ' this flag refers to the GPU index after the filtering has been done.'
+    ' Contrary to its name, this flag is also used for CPU and MPS devices.',
+)
+_JAX_BACKEND = flags.DEFINE_enum_class(
+    'jax_backend',
+    default=JaxBackend.GPU,
+    enum_class=JaxBackend,
+    help=(
+        'JAX backend to use. "gpu" uses a GPU for inference. "cpu" uses a CPU'
+        ' only for inference which is much slower than using a GPU, but can be'
+        ' useful for testing or running on systems without a GPU supported by'
+        ' JAX. "mps" uses a GPU on Apple Silicon. If you set this flag to "cpu"'
+        ' or "mps", you must also set --flash_attention_implementation=xla.'
+    ),
 )
 _BUCKETS = flags.DEFINE_list(
     'buckets',
     # pyformat: disable
-    ['256', '512', '768', '1024', '1280', '1536', '2048', '2560', '3072',
-     '3584', '4096', '4608', '5120'],
+    ['128', '256', '384', '512', '768', '1024', '1280', '1536', '2048', '2560',
+     '3072', '3584', '4096', '4608', '5120'],
     # pyformat: enable
     'Strictly increasing order of token sizes for which to cache compilations.'
     ' For any input with more tokens than the largest bucket size, a new bucket'
@@ -286,7 +427,35 @@ _NUM_SEEDS = flags.DEFINE_integer(
 _SAVE_EMBEDDINGS = flags.DEFINE_bool(
     'save_embeddings',
     False,
-    'Whether to save the final trunk single and pair embeddings in the output.',
+    'Whether to save the final trunk single and pair embeddings in the output.'
+    ' Note that the embeddings are large float16 arrays: num_tokens * 384'
+    ' + num_tokens * num_tokens * 128.',
+)
+_SAVE_DISTOGRAM = flags.DEFINE_bool(
+    'save_distogram',
+    False,
+    'Whether to save the final distogram in the output. Note that the distogram'
+    ' is a large float16 array: num_tokens * num_tokens * 64.',
+)
+_SAVE_TERMS_OF_USE = flags.DEFINE_bool(
+    'save_terms_of_use',
+    True,
+    'Whether to save the terms of use as an MD file in the output directory'
+    ' and add the license to the output mmCIF file.',
+)
+_FORCE_OUTPUT_DIR = flags.DEFINE_bool(
+    'force_output_dir',
+    False,
+    'Whether to force the output directory to be used even if it already exists'
+    ' and is non-empty. Useful to set this to True to run the data pipeline and'
+    ' the inference separately, but use the same output directory.',
+)
+_COMPRESS_LARGE_OUTPUT_FILES = flags.DEFINE_bool(
+    'compress_large_output_files',
+    False,
+    'If True, compresses the output mmCIF and confidences JSON files (the two'
+    ' largest files) using zstandard. Note that embeddings and distogram, if'
+    ' saved, are already stored in a compressed format.',
 )
 
 _SAMPLE_CROSSLINK_COMBINATIONS = flags.DEFINE_integer(
@@ -302,12 +471,22 @@ _REMOVE_OVERLAPPING_CROSSLINKS = flags.DEFINE_bool(
   ' crosslinks.',
 )
 
+_ABLATE_CROSSLINKERS = flags.DEFINE_bool(
+  'ablate_crosslinkers',
+  False,
+  'Control experiment: if set, XL tokens are zeroed before the diffusion'
+  ' module, so the XL ligand chains are left out of the predicted structure.'
+  ' The trunk (Evoformer) still sees them.',
+)
+
 def make_model_config(
     *,
-    flash_attention_implementation: attention.Implementation = 'triton',
+    flash_attention_implementation: tokamax.DotProductAttentionImplementation = 'triton',
     num_diffusion_samples: int = 5,
     num_recycles: int = 10,
     return_embeddings: bool = False,
+    return_distogram: bool = False,
+    ablate_crosslinkers: bool = False,
 ) -> model.Model.Config:
   """Returns a model config with some defaults overridden."""
   config = model.Model.Config()
@@ -317,6 +496,8 @@ def make_model_config(
   config.heads.diffusion.eval.num_samples = num_diffusion_samples
   config.num_recycles = num_recycles
   config.return_embeddings = return_embeddings
+  config.return_distogram = return_distogram
+  config.ablate_crosslinkers = ablate_crosslinkers
   return config
 
 
@@ -327,11 +508,11 @@ class ModelRunner:
       self,
       config: model.Model.Config,
       device: jax.Device,
-      model_dir: pathlib.Path,
+      model_dir: epath.PathLike,
   ):
     self._model_config = config
     self._device = device
-    self._model_dir = model_dir
+    self._model_dir = epath.Path(model_dir)
 
   @functools.cached_property
   def model_params(self) -> hk.Params:
@@ -374,27 +555,42 @@ class ModelRunner:
     result['__identifier__'] = identifier
     return result
 
-  def extract_inference_results_and_maybe_embeddings(
+  def extract_inference_results(
       self,
       batch: features.BatchDict,
       result: model.ModelResult,
       target_name: str,
-  ) -> tuple[list[model.InferenceResult], dict[str, np.ndarray] | None]:
-    """Extracts inference results and embeddings (if set) from model outputs."""
-    inference_results = list(
+  ) -> list[model.InferenceResult]:
+    """Extracts inference results from model outputs."""
+    return list(
         model.Model.get_inference_result(
             batch=batch, result=result, target_name=target_name
         )
     )
-    num_tokens = len(inference_results[0].metadata['token_chain_ids'])
+
+  def extract_embeddings(
+      self, result: model.ModelResult, num_tokens: int
+  ) -> dict[str, np.ndarray] | None:
+    """Extracts embeddings from model outputs."""
     embeddings = {}
     if 'single_embeddings' in result:
-      embeddings['single_embeddings'] = result['single_embeddings'][:num_tokens]
+      embeddings['single_embeddings'] = result['single_embeddings'][
+          :num_tokens
+      ].astype(np.float16)
     if 'pair_embeddings' in result:
       embeddings['pair_embeddings'] = result['pair_embeddings'][
           :num_tokens, :num_tokens
-      ]
-    return inference_results, embeddings or None
+      ].astype(np.float16)
+    return embeddings or None
+
+  def extract_distogram(
+      self, result: model.ModelResult, num_tokens: int
+  ) -> np.ndarray | None:
+    """Extracts distogram from model outputs."""
+    if 'distogram' not in result['distogram']:
+      return None
+    distogram = result['distogram']['distogram'][:num_tokens, :num_tokens, :]
+    return distogram
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -407,13 +603,14 @@ class ResultsForSeed:
     full_fold_input: The fold input that must also include the results of
       running the data pipeline - MSA and templates.
     embeddings: The final trunk single and pair embeddings, if requested.
+    distogram: The token distance histogram, if requested.
   """
 
   seed: int
   inference_results: Sequence[model.InferenceResult]
   full_fold_input: folding_input.Input
   embeddings: dict[str, np.ndarray] | None = None
-
+  distogram: np.ndarray | None = None
 
 def predict_structure_single(
     fold_input: folding_input.Input,
@@ -421,20 +618,8 @@ def predict_structure_single(
     seed: int,
     model_runner: ModelRunner,
 ) -> ResultsForSeed:
-    """
-    Runs inference and extracts output structures for a single seed.
-    
-    Args:
-        fold_input: Input object containing fold-specific data and parameters.
-        example: Featurised example for the given seed.
-        seed: Random seed for model inference.
-        model_runner: Model runner instance for performing inference.
-        
-    Returns:
-        ResultsForSeed containing the inference results for the seed.
-    """
+    """Runs inference and extracts output structures for a single seed."""
     print(f'Running model inference for seed {seed}...')
-
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key)
@@ -445,10 +630,16 @@ def predict_structure_single(
 
     print(f'Extracting inference results with seed {seed}...')
     extract_structures = time.time()
-    inference_results, embeddings = (
-        model_runner.extract_inference_results_and_maybe_embeddings(
-            batch=example, result=result, target_name=fold_input.name
-        )
+    inference_results = model_runner.extract_inference_results(
+        batch=example, result=result, target_name=fold_input.name
+    )
+
+    num_tokens = len(inference_results[0].metadata['token_chain_ids'])
+    embeddings = model_runner.extract_embeddings(
+        result=result, num_tokens=num_tokens
+    )
+    distogram = model_runner.extract_distogram(
+        result=result, num_tokens=num_tokens
     )
     print(
         f'Extracting {len(inference_results)} inference samples with'
@@ -460,20 +651,32 @@ def predict_structure_single(
         inference_results=inference_results,
         full_fold_input=fold_input,
         embeddings=embeddings,
+        distogram=distogram,
     )
 
 def predict_structure(
     fold_input: folding_input.Input,
     model_runner: ModelRunner,
     buckets: Sequence[int] | None = None,
+    ref_max_modified_date: datetime.date | None = None,
+    conformer_max_iterations: int | None = None,
+    resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
 ) -> Sequence[ResultsForSeed]:
     """Runs the full inference pipeline to predict structures for each seed."""
-    
+
     print(f'Featurising data for seeds {fold_input.rng_seeds}...')
     featurisation_start_time = time.time()
     ccd = chemical_components.cached_ccd(user_ccd=fold_input.user_ccd)
     featurised_examples = featurisation.featurise_input(
-        fold_input=fold_input, buckets=buckets, ccd=ccd, verbose=True
+        fold_input=fold_input,
+        buckets=buckets,
+        ccd=ccd,
+        verbose=True,
+        ref_max_modified_date=ref_max_modified_date,
+        conformer_max_iterations=conformer_max_iterations,
+        resolve_msa_overlaps=resolve_msa_overlaps,
+        fix_standalone_glycans=fix_standalone_glycans,
     )
     print(
         f'Featurising data for seeds {fold_input.rng_seeds} took '
@@ -504,50 +707,91 @@ def predict_structure(
 
 def write_fold_input_json(
     fold_input: folding_input.Input,
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
 ) -> None:
   """Writes the input JSON to the output directory."""
-  os.makedirs(output_dir, exist_ok=True)
-  path = os.path.join(output_dir, f'{fold_input.sanitised_name()}_data.json')
+  output_dir = epath.Path(output_dir)
+  output_dir.mkdir(parents=True, exist_ok=True)
+  path = output_dir / f'{fold_input.sanitised_name()}_data.json'
   print(f'Writing model input JSON to {path}')
-  with open(path, 'wt') as f:
-    f.write(fold_input.to_json())
+  path.write_text(fold_input.to_json())
 
 
 def write_outputs_single(
     inference_result,
-    output_dir: str,
+    output_dir: epath.PathLike,
     seed: int,
-    sample_idx: int
+    sample_idx: int,
+    job_name: str,
+    compress: bool = False,
+    keep_license: bool = True,
 ) -> float:
     """
     Writes a single inference result to its output directory.
-    
+
     Args:
         inference_result: The inference result to write.
         output_dir: The parent output directory.
         seed: The seed associated with the inference result.
-        sample_idx: The sample index for the inference result.        
+        sample_idx: The sample index for the inference result.
+        job_name: Name prefix for output files (e.g. sanitised fold input name).
+        compress: If True, compress large output files using zstandard.
+        keep_license: If True, keep the license in the output mmCIF file.
+
     Returns:
         The ranking score for the inference result.
     """
-    sample_dir = os.path.join(output_dir, f'seed-{seed}_sample-{sample_idx}')
-    os.makedirs(sample_dir, exist_ok=True)
+    sample_dir = epath.Path(output_dir) / f'seed-{seed}_sample-{sample_idx}'
+    sample_dir.mkdir(parents=True, exist_ok=True)
     post_processing.write_output(
-        inference_result=inference_result, 
-        output_dir=sample_dir
+        inference_result=inference_result,
+        output_dir=sample_dir,
+        name=f'{job_name}_seed-{seed}_sample-{sample_idx}',
+        compress=compress,
+        keep_license=keep_license,
     )
     ranking_score = float(inference_result.metadata['ranking_score'])
     return ranking_score
+
+
+def replace_db_dir(
+    path_with_db_dir: epath.PathLike, db_dirs: Sequence[str]
+) -> str:
+  """Replaces the DB_DIR placeholder in a path with the given DB_DIR."""
+  path_with_db_dir = os.fspath(path_with_db_dir)
+  template = string.Template(path_with_db_dir)
+  if 'DB_DIR' in template.get_identifiers():
+    for db_dir in db_dirs:
+      path = template.substitute(DB_DIR=db_dir)
+      if epath.Path(path).exists():
+        return path
+    raise FileNotFoundError(
+        f'{path_with_db_dir} with ${{DB_DIR}} not found in any of {db_dirs}.'
+    )
+  if (sharded_paths := shards.get_sharded_paths(path_with_db_dir)) is not None:
+    db_exists = all(epath.Path(p).exists() for p in sharded_paths)
+  else:
+    db_exists = epath.Path(path_with_db_dir).exists()
+  if not db_exists:
+    raise FileNotFoundError(f'{path_with_db_dir} does not exist.')
+  return path_with_db_dir
 
 
 @overload
 def process_fold_input(
     fold_input: folding_input.Input,
     data_pipeline_config: pipeline.DataPipelineConfig | None,
+    *,
     model_runner: None,
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
     buckets: Sequence[int] | None = None,
+    ref_max_modified_date: datetime.date | None = None,
+    conformer_max_iterations: int | None = None,
+    resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
+    force_output_dir: bool = False,
+    compress_large_output_files: bool = False,
+    save_terms_of_use: bool = True,
 ) -> folding_input.Input:
   ...
 
@@ -556,37 +800,35 @@ def process_fold_input(
 def process_fold_input(
     fold_input: folding_input.Input,
     data_pipeline_config: pipeline.DataPipelineConfig | None,
+    *,
     model_runner: ModelRunner,
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
     buckets: Sequence[int] | None = None,
+    ref_max_modified_date: datetime.date | None = None,
+    conformer_max_iterations: int | None = None,
+    resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
+    force_output_dir: bool = False,
+    compress_large_output_files: bool = False,
+    save_terms_of_use: bool = True,
 ) -> Sequence[ResultsForSeed]:
   ...
-
-
-def replace_db_dir(path_with_db_dir: str, db_dirs: Sequence[str]) -> str:
-  """Replaces the DB_DIR placeholder in a path with the given DB_DIR."""
-  template = string.Template(path_with_db_dir)
-  if 'DB_DIR' in template.get_identifiers():
-    for db_dir in db_dirs:
-      path = template.substitute(DB_DIR=db_dir)
-      if os.path.exists(path):
-        return path
-    raise FileNotFoundError(
-        f'{path_with_db_dir} with ${{DB_DIR}} not found in any of {db_dirs}.'
-    )
-  if not os.path.exists(path_with_db_dir):
-    raise FileNotFoundError(f'{path_with_db_dir} does not exist.')
-  return path_with_db_dir
 
 
 def process_fold_input(
     fold_input: folding_input.Input,
     data_pipeline_config: pipeline.DataPipelineConfig | None,
+    *,
     model_runner: ModelRunner | None,
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
     buckets: Sequence[int] | None = None,
-    return_all_inference_results: bool = False,
+    ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
+    resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
+    force_output_dir: bool = False,
+    compress_large_output_files: bool = False,
+    save_terms_of_use: bool = True,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
   """Runs data pipeline and/or inference on a single fold input.
 
@@ -601,8 +843,31 @@ def process_fold_input(
       number of tokens. If not None, must be a sequence of at least one integer,
       in strictly increasing order. Will raise an error if the number of tokens
       is more than the largest bucket size.
+    ref_max_modified_date: Optional maximum date that controls whether to allow
+      use of model coordinates for a chemical component from the CCD if RDKit
+      conformer generation fails and the component does not have ideal
+      coordinates set. Only for components that have been released before this
+      date the model coordinates can be used as a fallback.
     conformer_max_iterations: Optional override for maximum number of iterations
       to run for RDKit conformer search.
+    resolve_msa_overlaps: Whether to deduplicate unpaired MSA against paired
+      MSA. The default behaviour matches the method described in the AlphaFold 3
+      paper. Set this to false if providing custom paired MSA using the unpaired
+      MSA field to keep it exactly as is as deduplication against the paired MSA
+      could break the manually crafted pairing between MSA sequences.
+    fix_standalone_glycans: If True, standalone glycans are preserved when
+      filter_leaving_atoms is True. This is False by default to match the
+      AlphaFold 3 paper. Note that the model has been trained with the default
+      setting, so setting this to True may cause non-standard behaviour of the
+      model.
+    force_output_dir: If True, do not create a new output directory even if the
+      existing one is non-empty. Instead use the existing output directory and
+      potentially overwrite existing files. If False, create a new timestamped
+      output directory instead if the existing one is non-empty.
+    compress_large_output_files: If True, compress large output files (mmCIF and
+      confidences JSON) using zstandard.
+    save_terms_of_use: If True, write the terms of use to the output directory
+      and add the license to the output mmCIF file.
 
   Returns:
     The processed fold input, or the inference results for each seed.
@@ -615,9 +880,11 @@ def process_fold_input(
   if not fold_input.chains:
     raise ValueError('Fold input has no chains.')
 
-  if os.path.exists(output_dir) and os.listdir(output_dir):
+  output_dir = epath.Path(output_dir)
+  if not force_output_dir and output_dir.exists() and any(output_dir.iterdir()):
     new_output_dir = (
-        f'{output_dir}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        output_dir.parent
+        / f'{output_dir.name}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'
     )
     print(
         f'Output will be written in {new_output_dir} since {output_dir} is'
@@ -638,32 +905,45 @@ def process_fold_input(
     print('Skipping model inference...')
     output = fold_input
   else:
+    # Expand XLs after writing the JSON, so the JSON stays reusable as input.
+    if fold_input.disulfide_bonds or fold_input.crosslinks:
+      fold_input = fold_input.expand_links()
+
     print(
         f'Predicting 3D structure for {fold_input.name} with'
         f' {len(fold_input.rng_seeds)} seed(s)...'
     )
 
-    print(f'Featurising data for seeds {fold_input.rng_seeds}...')
+    print(f'Featurising data with {len(fold_input.rng_seeds)} seed(s)...')
     featurisation_start_time = time.time()
     ccd = chemical_components.cached_ccd(user_ccd=fold_input.user_ccd)
     featurised_examples = featurisation.featurise_input(
-        fold_input=fold_input, buckets=buckets, ccd=ccd, verbose=True
+        fold_input=fold_input,
+        buckets=buckets,
+        ccd=ccd,
+        verbose=True,
+        ref_max_modified_date=ref_max_modified_date,
+        conformer_max_iterations=conformer_max_iterations,
+        resolve_msa_overlaps=resolve_msa_overlaps,
+        fix_standalone_glycans=fix_standalone_glycans,
     )
     print(
-        f'Featurising data for seeds {fold_input.rng_seeds} took '
-        f'{time.time() - featurisation_start_time:.2f} seconds.'
+        f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
+        f' {time.time() - featurisation_start_time:.2f} seconds.'
     )
-    
+
+    job_name = fold_input.sanitised_name()
     all_inference_start_time = time.time()
     ranking_scores = []
     max_ranking_score = None
     max_ranking_result = None
 
     output_terms = (
-        pathlib.Path(alphafold3.cpp.__file__).parent / 'OUTPUT_TERMS_OF_USE.md'
+        epath.Path(alphafold3.cpp.__file__).parent / 'OUTPUT_TERMS_OF_USE.md'
     ).read_text()
 
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    af3x_version.write_version_info(output_dir, job_name)
 
     all_inference_results = []
     for seed, example in zip(fold_input.rng_seeds, featurised_examples):
@@ -673,8 +953,7 @@ def process_fold_input(
           seed=seed,
           model_runner=model_runner,
       )
-      if return_all_inference_results:
-        all_inference_results.append(result)
+      all_inference_results.append(result)
 
       writing_start_time = time.time()
       for sample_idx, inference_result in enumerate(result.inference_results):
@@ -682,41 +961,55 @@ def process_fold_input(
             inference_result=inference_result,
             output_dir=output_dir,
             seed=seed,
-            sample_idx=sample_idx
+            sample_idx=sample_idx,
+            job_name=job_name,
+            compress=compress_large_output_files,
+            keep_license=save_terms_of_use,
         )
-
         ranking_scores.append((seed, sample_idx, ranking_score))
         if max_ranking_score is None or ranking_score > max_ranking_score:
-            max_ranking_score = ranking_score
-            max_ranking_result = inference_result
+          max_ranking_score = ranking_score
+          max_ranking_result = inference_result
 
       if embeddings := result.embeddings:
-        embeddings_dir = os.path.join(output_dir, f'seed-{seed}_embeddings')
-        os.makedirs(embeddings_dir, exist_ok=True)
+        embeddings_dir = output_dir / f'seed-{seed}_embeddings'
+        embeddings_dir.mkdir(parents=True, exist_ok=True)
         post_processing.write_embeddings(
-            embeddings=embeddings, output_dir=embeddings_dir
+            embeddings=embeddings,
+            output_dir=embeddings_dir,
+            name=f'{job_name}_seed-{seed}',
         )
+
+      if (distogram := result.distogram) is not None:
+        distogram_dir = output_dir / f'seed-{seed}_distogram'
+        distogram_dir.mkdir(parents=True, exist_ok=True)
+        distogram_path = distogram_dir / f'{job_name}_seed-{seed}_distogram.npz'
+        with io.BytesIO() as bio:
+          np.savez_compressed(bio, distogram=distogram.astype(np.float16))
+          distogram_path.write_bytes(bio.getvalue())
 
       print(
           'Extracting and writing output structures for seed'
-          f' {seed} took  {time.time() - writing_start_time:.2f} seconds.'
+          f' {seed} took {time.time() - writing_start_time:.2f} seconds.'
       )
 
     if max_ranking_result is not None:  # True iff ranking_scores non-empty.
-        job_name = fold_input.sanitised_name()
-        post_processing.write_output(
-            inference_result=max_ranking_result,
-            output_dir=output_dir,
-            # The output terms of use are the same for all seeds/samples.
-            terms_of_use=output_terms,
-            name=job_name,
-        )
-        # Save csv of ranking scores with seeds and sample indices, to allow easier
-        # comparison of ranking scores across different runs.
-        with open(os.path.join(output_dir, 'ranking_scores.csv'), 'wt') as f:
-            writer = csv.writer(f)
-            writer.writerow(['seed', 'sample', 'ranking_score'])
-            writer.writerows(ranking_scores)
+      post_processing.write_output(
+          inference_result=max_ranking_result,
+          output_dir=output_dir,
+          # The output terms of use are the same for all seeds/samples.
+          terms_of_use=output_terms if save_terms_of_use else None,
+          name=job_name,
+          compress=compress_large_output_files,
+          keep_license=save_terms_of_use,
+      )
+      # Save csv of ranking scores with seeds and sample indices, to allow easier
+      # comparison of ranking scores across different runs.
+      ranking_scores_csv_path = output_dir / f'{job_name}_ranking_scores.csv'
+      with ranking_scores_csv_path.open('w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['seed', 'sample', 'ranking_score'])
+        writer.writerows(ranking_scores)
 
     print(
         'Running model inference and extracting output structures for seeds '
@@ -729,12 +1022,13 @@ def process_fold_input(
   return output
 
 def main(_):
+  print(f'AF3x version: {af3x_version.short_id()}')
   if _JAX_COMPILATION_CACHE_DIR.value is not None:
     jax.config.update(
         'jax_compilation_cache_dir', _JAX_COMPILATION_CACHE_DIR.value
     )
 
-  if _JSON_PATH.value is None == _INPUT_DIR.value is None:
+  if (_JSON_PATH.value is None) == (_INPUT_DIR.value is None):
     raise ValueError(
         'Exactly one of --json_path or --input_dir must be specified.'
     )
@@ -746,52 +1040,67 @@ def main(_):
     )
 
   if _INPUT_DIR.value is not None:
-    fold_inputs = folding_input.load_fold_inputs_from_dir(
-        pathlib.Path(_INPUT_DIR.value)
-    )
+    fold_inputs = folding_input.load_fold_inputs_from_dir(_INPUT_DIR.value)
   elif _JSON_PATH.value is not None:
-    fold_inputs = folding_input.load_fold_inputs_from_path(
-        pathlib.Path(_JSON_PATH.value)
-    )
+    fold_inputs = folding_input.load_fold_inputs_from_path(_JSON_PATH.value)
   else:
     raise AssertionError(
         'Exactly one of --json_path or --input_dir must be specified.'
     )
 
+  if _OUTPUT_DIR.value is None:
+    raise ValueError('Output directory must be specified with --output_dir.')
+
   # Make sure we can create the output directory before running anything.
   try:
-    os.makedirs(_OUTPUT_DIR.value, exist_ok=True)
+    _OUTPUT_DIR.value.mkdir(parents=True, exist_ok=True)
   except OSError as e:
     print(f'Failed to create output directory {_OUTPUT_DIR.value}: {e}')
     raise
 
   if _RUN_INFERENCE.value:
     # Fail early on incompatible devices, but only if we're running inference.
-    gpu_devices = jax.local_devices(backend='gpu')
-    if gpu_devices:
-      compute_capability = float(
-          gpu_devices[_GPU_DEVICE.value].compute_capability
-      )
-      if compute_capability < 6.0:
+    if _JAX_BACKEND.value in {JaxBackend.CPU, JaxBackend.MPS}:
+      if _FLASH_ATTENTION_IMPLEMENTATION.value != 'xla':
         raise ValueError(
-            'AlphaFold 3 requires at least GPU compute capability 6.0 (see'
-            ' https://developer.nvidia.com/cuda-gpus).'
+            'For CPU-only or MPS inference, --flash_attention_implementation'
+            ' must be set to "xla".'
         )
-      elif 7.0 <= compute_capability < 8.0:
-        xla_flags = os.environ.get('XLA_FLAGS')
-        required_flag = '--xla_disable_hlo_passes=custom-kernel-fusion-rewriter'
-        if not xla_flags or required_flag not in xla_flags:
-          raise ValueError(
-              'For devices with GPU compute capability 7.x (see'
-              ' https://developer.nvidia.com/cuda-gpus) the ENV XLA_FLAGS must'
-              f' include "{required_flag}".'
+    elif _JAX_BACKEND.value == JaxBackend.GPU:
+      gpu_devices = jax.local_devices(backend='gpu')
+      if gpu_devices:
+        compute_capability = gpu_devices[_GPU_DEVICE.value].compute_capability
+        if compute_capability.startswith('gfx'):
+          raise NotImplementedError(
+              f'Detected AMD GPU {gpu_devices[_GPU_DEVICE.value].device_kind} '
+              ' which is not currently supported.'
           )
-        if _FLASH_ATTENTION_IMPLEMENTATION.value != 'xla':
+        # We now assume we have an NVIDIA GPU with a numeric compute capability.
+        compute_capability = float(compute_capability)
+        if compute_capability < 6.0:
           raise ValueError(
-              'For devices with GPU compute capability 7.x (see'
-              ' https://developer.nvidia.com/cuda-gpus) the'
-              ' --flash_attention_implementation must be set to "xla".'
+              'AlphaFold 3 requires at least GPU compute capability 6.0 (see'
+              ' https://developer.nvidia.com/cuda-gpus).'
           )
+        elif 7.0 <= compute_capability < 8.0:
+          xla_flags = os.environ.get('XLA_FLAGS')
+          required_flag = (
+              '--xla_disable_hlo_passes=custom-kernel-fusion-rewriter'
+          )
+          if not xla_flags or required_flag not in xla_flags:
+            raise ValueError(
+                'For devices with GPU compute capability 7.x (see'
+                ' https://developer.nvidia.com/cuda-gpus) the ENV XLA_FLAGS'
+                f' must include "{required_flag}".'
+            )
+          if _FLASH_ATTENTION_IMPLEMENTATION.value != 'xla':
+            raise ValueError(
+                'For devices with GPU compute capability 7.x (see'
+                ' https://developer.nvidia.com/cuda-gpus) the'
+                ' --flash_attention_implementation must be set to "xla".'
+            )
+    else:
+      raise ValueError(f'Unsupported JAX backend: {_JAX_BACKEND.value}')
 
   notice = textwrap.wrap(
       'Running AlphaFold 3. Please note that standard AlphaFold 3 model'
@@ -806,14 +1115,16 @@ def main(_):
   )
   print('\n' + '\n'.join(notice) + '\n')
 
-  fold_inputs = list(fold_inputs) # Convert to list to allow multiple iterations
+  max_template_date = datetime.date.fromisoformat(_MAX_TEMPLATE_DATE.value)
+
+  fold_inputs = list(fold_inputs)  # Convert to list to allow multiple iterations
 
   if _RUN_INFERENCE.value and _SAMPLE_CROSSLINK_COMBINATIONS.value > 0:
     out_fold_inputs = []
     for fold_input in fold_inputs:
       if fold_input.crosslinks:
         combinations_fold_inputs = fold_input.sample_crosslink_combinations(
-          _SAMPLE_CROSSLINK_COMBINATIONS.value)
+            _SAMPLE_CROSSLINK_COMBINATIONS.value)
         out_fold_inputs.extend(combinations_fold_inputs)
       else:
         out_fold_inputs.append(fold_input)
@@ -823,53 +1134,68 @@ def main(_):
     for idx, fold_input in enumerate(fold_inputs):
       if fold_input.crosslinks:
         fold_inputs[idx] = fold_input.remove_overlapping_crosslinks()
-
   if _RUN_DATA_PIPELINE.value:
     expand_path = lambda x: replace_db_dir(x, DB_DIR.value)
-    max_template_date = datetime.date.fromisoformat(_MAX_TEMPLATE_DATE.value)
     data_pipeline_config = pipeline.DataPipelineConfig(
-        jackhmmer_binary_path=_JACKHMMER_BINARY_PATH.value,
-        nhmmer_binary_path=_NHMMER_BINARY_PATH.value,
-        hmmalign_binary_path=_HMMALIGN_BINARY_PATH.value,
-        hmmsearch_binary_path=_HMMSEARCH_BINARY_PATH.value,
-        hmmbuild_binary_path=_HMMBUILD_BINARY_PATH.value,
+        jackhmmer_binary_path=_JACKHMMER_BINARY_PATH.value,  # pyrefly: ignore[bad-argument-type]
+        nhmmer_binary_path=_NHMMER_BINARY_PATH.value,  # pyrefly: ignore[bad-argument-type]
+        hmmalign_binary_path=_HMMALIGN_BINARY_PATH.value,  # pyrefly: ignore[bad-argument-type]
+        hmmsearch_binary_path=_HMMSEARCH_BINARY_PATH.value,  # pyrefly: ignore[bad-argument-type]
+        hmmbuild_binary_path=_HMMBUILD_BINARY_PATH.value,  # pyrefly: ignore[bad-argument-type]
         small_bfd_database_path=expand_path(_SMALL_BFD_DATABASE_PATH.value),
+        small_bfd_z_value=_SMALL_BFD_Z_VALUE.value,
         mgnify_database_path=expand_path(_MGNIFY_DATABASE_PATH.value),
+        mgnify_z_value=_MGNIFY_Z_VALUE.value,
         uniprot_cluster_annot_database_path=expand_path(
             _UNIPROT_CLUSTER_ANNOT_DATABASE_PATH.value
         ),
+        uniprot_cluster_annot_z_value=_UNIPROT_CLUSTER_ANNOT_Z_VALUE.value,
         uniref90_database_path=expand_path(_UNIREF90_DATABASE_PATH.value),
+        uniref90_z_value=_UNIREF90_Z_VALUE.value,
         ntrna_database_path=expand_path(_NTRNA_DATABASE_PATH.value),
+        ntrna_z_value=_NTRNA_Z_VALUE.value,
         rfam_database_path=expand_path(_RFAM_DATABASE_PATH.value),
+        rfam_z_value=_RFAM_Z_VALUE.value,
         rna_central_database_path=expand_path(_RNA_CENTRAL_DATABASE_PATH.value),
+        rna_central_z_value=_RNA_CENTRAL_Z_VALUE.value,
         pdb_database_path=expand_path(_PDB_DATABASE_PATH.value),
         seqres_database_path=expand_path(_SEQRES_DATABASE_PATH.value),
         jackhmmer_n_cpu=_JACKHMMER_N_CPU.value,
+        jackhmmer_max_parallel_shards=_JACKHMMER_MAX_PARALLEL_SHARDS.value,
         nhmmer_n_cpu=_NHMMER_N_CPU.value,
+        nhmmer_max_parallel_shards=_NHMMER_MAX_PARALLEL_SHARDS.value,
+        hmmsearch_n_cpu=_HMMSEARCH_N_CPU.value,
         max_template_date=max_template_date,
     )
   else:
     data_pipeline_config = None
 
   if _RUN_INFERENCE.value:
-    devices = jax.local_devices(backend='gpu')
+    devices = jax.local_devices(backend=_JAX_BACKEND.value)
+    device = devices[_GPU_DEVICE.value]
+    # Tokamax picks kernels at trace time from JAX's default device, not from
+    # the jit target, so make the selected device the default.
+    jax.config.update('jax_default_device', device)
     print(
-        f'Found local devices: {devices}, using device {_GPU_DEVICE.value}:'
-        f' {devices[_GPU_DEVICE.value]}'
+        f'Found local {str(_JAX_BACKEND.value).upper()} devices: {devices},'
+        f' using device {_GPU_DEVICE.value}: {device}'
     )
 
     print('Building model from scratch...')
     model_runner = ModelRunner(
         config=make_model_config(
             flash_attention_implementation=typing.cast(
-                attention.Implementation, _FLASH_ATTENTION_IMPLEMENTATION.value
+                tokamax.DotProductAttentionImplementation,
+                _FLASH_ATTENTION_IMPLEMENTATION.value,
             ),
             num_diffusion_samples=_NUM_DIFFUSION_SAMPLES.value,
             num_recycles=_NUM_RECYCLES.value,
             return_embeddings=_SAVE_EMBEDDINGS.value,
+            return_distogram=_SAVE_DISTOGRAM.value,
+            ablate_crosslinkers=_ABLATE_CROSSLINKERS.value,
         ),
-        device=devices[_GPU_DEVICE.value],
-        model_dir=pathlib.Path(MODEL_DIR.value),
+        device=device,
+        model_dir=MODEL_DIR.value,
     )
     # Check we can load the model parameters before launching anything.
     print('Checking that model parameters can be loaded...')
@@ -882,15 +1208,19 @@ def main(_):
     if _NUM_SEEDS.value is not None:
       print(f'Expanding fold job {fold_input.name} to {_NUM_SEEDS.value} seeds')
       fold_input = fold_input.with_multiple_seeds(_NUM_SEEDS.value)
-    if _RUN_INFERENCE.value and (fold_input.disulfide_bonds or fold_input.crosslinks):
-      fold_input = fold_input.expand_links()
     process_fold_input(
         fold_input=fold_input,
         data_pipeline_config=data_pipeline_config,
         model_runner=model_runner,
-        output_dir=os.path.join(_OUTPUT_DIR.value, fold_input.sanitised_name()),
+        output_dir=_OUTPUT_DIR.value / fold_input.sanitised_name(),
         buckets=tuple(int(bucket) for bucket in _BUCKETS.value),
+        ref_max_modified_date=max_template_date,
         conformer_max_iterations=_CONFORMER_MAX_ITERATIONS.value,
+        resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,
+        fix_standalone_glycans=_FIX_STANDALONE_GLYCANS.value,
+        force_output_dir=_FORCE_OUTPUT_DIR.value,
+        compress_large_output_files=_COMPRESS_LARGE_OUTPUT_FILES.value,
+        save_terms_of_use=_SAVE_TERMS_OF_USE.value,
     )
     num_fold_inputs += 1
 

@@ -1,21 +1,33 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """The main featurizer."""
 
 import bisect
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import datetime
 import itertools
 
 from absl import logging
+from alphafold3 import structure
 from alphafold3.common import base_config
 from alphafold3.common import folding_input
 from alphafold3.constants import chemical_components
@@ -95,10 +107,13 @@ class WholePdbPipeline:
       msa_crop_size: Maximum size of MSA to take across all chains.
       max_template_date: Optional max template date to prevent data leakage in
         validation.
+      ref_max_modified_date: Optional maximum date that controls whether to
+        allow use of model coordinates for a chemical component from the CCD if
+        RDKit conformer generation fails and the component does not have ideal
+        coordinates set. Only for components that have been released before this
+        date the model coordinates can be used as a fallback.
       max_templates: The maximum number of templates to send through the network
         set to 0 to switch off templates.
-      filter_clashes: If true then will remove clashing chains.
-      filter_crystal_aids: If true ligands in the cryal aid list are removed.
       max_paired_sequence_per_species: The maximum number of sequences per
         species that will be used for MSA pairing.
       drop_ligand_leaving_atoms: Flag for handling leaving atoms for ligands.
@@ -109,10 +124,20 @@ class WholePdbPipeline:
       atom_cross_att_keys_subset_size: keys subset size in atom cross attention
       flatten_non_standard_residues: Whether to expand non-standard polymer
         residues into flat-atom format.
-      remove_nonsymmetric_bonds: Whether to remove nonsymmetric bonds from
-        symmetric polymer chains.
       deterministic_frames: Whether to use fixed-seed reference positions to
         construct deterministic frames.
+      resolve_msa_overlaps: Whether to deduplicate unpaired MSA against paired
+        MSA. The default behaviour matches the method described in the AlphaFold
+        3 paper. Set this to false if providing custom paired MSA using the
+        unpaired MSA field to keep it exactly as is as deduplication against
+        the paired MSA could break the manually crafted pairing between MSA
+        sequences.
+      fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+        out leaving atoms from glycan ligands even if they were not bonded to
+        anything ("standalone" glycans). Setting this flag to True fixes this
+        undesirable behavior, but moves away from the regime where AlphaFold 3
+        was trained and evaluated. This has only an effect if
+        drop_ligand_leaving_atoms is True.
     """
 
     max_atoms_per_token: int = 24
@@ -122,56 +147,52 @@ class WholePdbPipeline:
     min_total_residues: int | None = None
     msa_crop_size: int = 16384
     max_template_date: datetime.date | None = None
+    ref_max_modified_date: datetime.date | None = None
     max_templates: int = 4
-    filter_clashes: bool = False
-    filter_crystal_aids: bool = False
     max_paired_sequence_per_species: int = 600
     drop_ligand_leaving_atoms: bool = True
     average_num_atoms_per_token: int = 24
     atom_cross_att_queries_subset_size: int = 32
     atom_cross_att_keys_subset_size: int = 128
     flatten_non_standard_residues: bool = True
-    remove_nonsymmetric_bonds: bool = False
     deterministic_frames: bool = True
     conformer_max_iterations: int | None = None
+    resolve_msa_overlaps: bool = True
+    fix_standalone_glycans: bool = False
 
-  def __init__(
-      self,
-      *,
-      config: Config,
-  ):
-    """Init WholePdb.
+  def __init__(self, *, config: Config):
+    """Initializes WholePdb data pipeline.
 
     Args:
       config: Pipeline configuration.
     """
     self._config = config
 
-  def process_item(
+  def process_structure(
       self,
-      fold_input: folding_input.Input,
+      struct: structure.Structure,
       random_state: np.random.RandomState,
       ccd: chemical_components.Ccd,
+      unpaired_msa_by_chain_id: Mapping[str, str],
+      paired_msa_by_chain_id: Mapping[str, str],
+      templates_by_chain_id: Mapping[str, Sequence[folding_input.Template]],
       random_seed: int | None = None,
-  ) -> features.BatchDict:
-    """Takes requests from in_queue, adds (key, serialized ex) to out_queue."""
+      xl_chain_ids: frozenset[str] = frozenset(),
+  ) -> feat_batch.Batch:
+    """Computes features for a structure and associated MSAs/templates."""
     if random_seed is None:
       random_seed = random_state.randint(2**31)
 
     random_state = np.random.RandomState(seed=random_seed)
-
-    logging_name = f'{fold_input.name}, random_seed={random_seed}'
-    logging.info('processing %s', logging_name)
-    struct = fold_input.to_structure(ccd=ccd)
+    logging_name = f'{struct.name}, random_seed={random_seed}'
+    logging.info('Processing %s', logging_name)
 
     # Clean structure.
-    cleaned_struc, cleaning_metadata = structure_cleaning.clean_structure(
+    cleaned_struc = structure_cleaning.clean_structure(
         struct,
         ccd=ccd,
         drop_non_standard_atoms=True,
         drop_missing_sequence=True,
-        filter_clashes=self._config.filter_clashes,
-        filter_crystal_aids=self._config.filter_crystal_aids,
         filter_waters=True,
         filter_hydrogens=True,
         filter_leaving_atoms=self._config.drop_ligand_leaving_atoms,
@@ -179,21 +200,10 @@ class WholePdbPipeline:
         covalent_bonds_only=True,
         remove_polymer_polymer_bonds=True,
         remove_bad_bonds=True,
-        remove_nonsymmetric_bonds=self._config.remove_nonsymmetric_bonds,
+        fix_standalone_glycans=self._config.fix_standalone_glycans,
     )
 
-    num_clashing_chains_removed = cleaning_metadata[
-        'num_clashing_chains_removed'
-    ]
-
-    if num_clashing_chains_removed:
-      logging.info(
-          'Removed %d clashing chains from %s',
-          num_clashing_chains_removed,
-          logging_name,
-      )
-
-    # No chains after fixes
+    # No chains after cleaning.
     if cleaned_struc.num_chains == 0:
       raise MmcifNumChainsError(f'{logging_name}: No chains in structure!')
 
@@ -219,6 +229,7 @@ class WholePdbPipeline:
             polymer_ligand_bonds=polymer_ligand_bonds,
             ligand_ligand_bonds=ligand_ligand_bonds,
             drop_ligand_leaving_atoms=self._config.drop_ligand_leaving_atoms,
+            fix_standalone_glycans=self._config.fix_standalone_glycans,
         )
     )
 
@@ -295,12 +306,13 @@ class WholePdbPipeline:
     batch_token_features = features.TokenFeatures.compute_features(
         all_tokens=all_tokens,
         padding_shapes=padding_shapes,
+        xl_chain_ids=xl_chain_ids,
     )
 
     # Create reference structure features
     chemical_components_data = struc_chem_comps.populate_missing_ccd_data(
         ccd=ccd,
-        chemical_components_data=cleaned_struc.chemical_components_data,
+        chemical_components_data=cleaned_struc.chemical_components_data,  # pyrefly: ignore[bad-argument-type]
         populate_pdbx_smiles=True,
     )
 
@@ -312,11 +324,10 @@ class WholePdbPipeline:
     batch_convert_model_output = features.ConvertModelOutput.compute_features(
         all_token_atoms_layout=all_token_atoms_layout,
         padding_shapes=padding_shapes,
-        cleaned_struc=cleaned_struc,
         flat_output_layout=flat_output_layout,
         empty_output_struc=empty_output_struc,
-        polymer_ligand_bonds=polymer_ligand_bonds,
-        ligand_ligand_bonds=ligand_ligand_bonds,
+        polymer_ligand_bonds=polymer_ligand_bonds,  # pyrefly: ignore[bad-argument-type]
+        ligand_ligand_bonds=ligand_ligand_bonds,  # pyrefly: ignore[bad-argument-type]
     )
 
     # Create the PredictedStructureInfo
@@ -333,9 +344,11 @@ class WholePdbPipeline:
         all_tokens=all_tokens,
         standard_token_idxs=standard_token_idxs,
         padding_shapes=padding_shapes,
-        fold_input=fold_input,
+        unpaired_msa_by_chain_id=unpaired_msa_by_chain_id,
+        paired_msa_by_chain_id=paired_msa_by_chain_id,
         logging_name=logging_name,
         max_paired_sequence_per_species=self._config.max_paired_sequence_per_species,
+        resolve_msa_overlaps=self._config.resolve_msa_overlaps,
     )
 
     # Create template features
@@ -343,12 +356,12 @@ class WholePdbPipeline:
         all_tokens=all_tokens,
         standard_token_idxs=standard_token_idxs,
         padding_shapes=padding_shapes,
-        fold_input=fold_input,
+        templates_by_chain_id=templates_by_chain_id,
         max_templates=self._config.max_templates,
         logging_name=logging_name,
     )
 
-    ref_max_modified_date = self._config.max_template_date
+    ref_max_modified_date = self._config.ref_max_modified_date
     conformer_max_iterations = self._config.conformer_max_iterations
     batch_ref_structure, ligand_ligand_bonds = (
         features.RefStructure.compute_features(
@@ -357,7 +370,7 @@ class WholePdbPipeline:
             padding_shapes=padding_shapes,
             chemical_components_data=chemical_components_data,
             random_state=random_state,
-            ref_max_modified_date=ref_max_modified_date,
+            ref_max_modified_date=ref_max_modified_date,  # pyrefly: ignore[bad-argument-type]
             conformer_max_iterations=conformer_max_iterations,
             ligand_ligand_bonds=ligand_ligand_bonds,
         )
@@ -372,7 +385,7 @@ class WholePdbPipeline:
           random_state=(
               np.random.RandomState(_DETERMINISTIC_FRAMES_RANDOM_SEED)
           ),
-          ref_max_modified_date=ref_max_modified_date,
+          ref_max_modified_date=ref_max_modified_date,  # pyrefly: ignore[bad-argument-type]
           conformer_max_iterations=None,
           ligand_ligand_bonds=ligand_ligand_bonds,
       )
@@ -404,7 +417,7 @@ class WholePdbPipeline:
         all_tokens=all_tokens,
         all_token_atoms_layout=all_token_atoms_layout,
         ref_structure=(
-            deterministic_ref_structure
+            deterministic_ref_structure  # pyrefly: ignore[bad-argument-type]
             if self._config.deterministic_frames
             else batch_ref_structure
         ),
@@ -426,9 +439,40 @@ class WholePdbPipeline:
         frames=batch_frames,
     )
 
+    return batch
+
+  def process_item(
+      self,
+      fold_input: folding_input.Input,
+      random_state: np.random.RandomState,
+      ccd: chemical_components.Ccd,
+      random_seed: int | None = None,
+  ) -> features.BatchDict:
+    """Takes requests from in_queue, adds (key, serialized ex) to out_queue."""
+    struct = fold_input.to_structure(ccd=ccd)
+    unpaired_msa_by_chain_id = {}
+    paired_msa_by_chain_id = {}
+    templates_by_chain_id = {}
+    for chain in fold_input.chains:
+      if isinstance(
+          chain, (folding_input.ProteinChain, folding_input.RnaChain)
+      ):
+        unpaired_msa_by_chain_id[chain.id] = chain.unpaired_msa
+      if isinstance(chain, folding_input.ProteinChain):
+        paired_msa_by_chain_id[chain.id] = chain.paired_msa
+        templates_by_chain_id[chain.id] = list(chain.templates)  # pyrefly: ignore[bad-argument-type]
+
+    batch = self.process_structure(
+        struct=struct,
+        random_state=random_state,
+        ccd=ccd,
+        unpaired_msa_by_chain_id=unpaired_msa_by_chain_id,
+        paired_msa_by_chain_id=paired_msa_by_chain_id,
+        templates_by_chain_id=templates_by_chain_id,
+        random_seed=random_seed,
+        xl_chain_ids=fold_input.crosslinker_chain_ids,
+    )
     np_example = batch.as_data_dict()
-    if 'num_iter_recycling' in np_example:
-      del np_example['num_iter_recycling']  # that does not belong here
 
     for name, value in np_example.items():
       if (
@@ -437,9 +481,7 @@ class WholePdbPipeline:
           and np.isnan(np.sum(value))
       ):
         raise NanDataError(
-            'The output of the data pipeline contained nans. '
-            f'nan feature: {name}, fold input name: {fold_input.name}, '
-            f'random_seed {random_seed}'
+            f'Data pipeline output for struct.name={struct.name},'
+            f' random_seed={random_seed} contains NaNs. NaN feature: {name}'
         )
-
     return np_example

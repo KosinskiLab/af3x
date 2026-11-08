@@ -1,12 +1,23 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """AlphaFold3 model."""
 
@@ -39,10 +50,9 @@ import numpy as np
 
 
 ModelResult: TypeAlias = Mapping[str, Any]
-_ScalarNumberOrArray: TypeAlias = Mapping[str, float | int | np.ndarray]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class InferenceResult:
   """Postprocessed model result.
 
@@ -58,8 +68,12 @@ class InferenceResult:
   """
 
   predicted_structure: structure.Structure = dataclasses.field()
-  numerical_data: _ScalarNumberOrArray = dataclasses.field(default_factory=dict)
-  metadata: _ScalarNumberOrArray = dataclasses.field(default_factory=dict)
+  numerical_data: Mapping[str, float | int | np.ndarray] = dataclasses.field(
+      default_factory=dict
+  )
+  metadata: Mapping[str, float | int | np.ndarray] = dataclasses.field(
+      default_factory=dict
+  )
   debug_outputs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
   model_id: bytes = b''
 
@@ -110,7 +124,7 @@ def get_predicted_structure(
         zip(
             missing_atoms_flat_layout.chain_id,
             missing_atoms_flat_layout.res_id,
-            missing_atoms_flat_layout.res_name,
+            missing_atoms_flat_layout.res_name,  # pyrefly: ignore[bad-argument-type]
             missing_atoms_flat_layout.atom_name,
         )
     )
@@ -126,10 +140,10 @@ def get_predicted_structure(
   # Put them into a structure
   pred_struc = batch.convert_model_output.empty_output_struc
   pred_struc = pred_struc.copy_and_update_atoms(
-      atom_x=pred_flat_atom_coords[..., 0],
-      atom_y=pred_flat_atom_coords[..., 1],
-      atom_z=pred_flat_atom_coords[..., 2],
-      atom_b_factor=pred_flat_b_factors,
+      atom_x=pred_flat_atom_coords[..., 0],  # pyrefly: ignore[bad-argument-type]
+      atom_y=pred_flat_atom_coords[..., 1],  # pyrefly: ignore[bad-argument-type]
+      atom_z=pred_flat_atom_coords[..., 2],  # pyrefly: ignore[bad-argument-type]
+      atom_b_factor=pred_flat_b_factors,  # pyrefly: ignore[bad-argument-type]
       atom_occupancy=np.ones(pred_flat_atom_coords.shape[:-1]),  # Always 1.0.
   )
   # Set manually/differently when adding metadata.
@@ -210,6 +224,52 @@ def _compute_chain_pair_iptm(
   )
 
 
+def _ablate_crosslinkers_in_batch(
+    batch: feat_batch.Batch,
+    is_crosslinker: jnp.ndarray,
+) -> feat_batch.Batch:
+  """Returns a batch with crosslinker tokens excluded from diffusion/confidence."""
+  xl = is_crosslinker.astype(jnp.float32)  # (N,)
+  not_xl = 1.0 - xl
+  new_atom_mask = (batch.predicted_structure_info.atom_mask * not_xl[:, None]).astype(
+      batch.predicted_structure_info.atom_mask.dtype
+  )
+  new_seq_mask = (batch.token_features.mask * not_xl).astype(
+      batch.token_features.mask.dtype
+  )
+  new_frames_mask = (batch.frames.mask * not_xl).astype(batch.frames.mask.dtype)
+  new_ref_mask = batch.ref_structure.mask * not_xl[:, None].astype(jnp.bool_)
+  new_ref_pos = batch.ref_structure.positions * not_xl[:, None, None]
+  return dataclasses.replace(
+      batch,
+      predicted_structure_info=dataclasses.replace(
+          batch.predicted_structure_info, atom_mask=new_atom_mask
+      ),
+      token_features=dataclasses.replace(
+          batch.token_features, mask=new_seq_mask
+      ),
+      frames=dataclasses.replace(batch.frames, mask=new_frames_mask),
+      ref_structure=dataclasses.replace(
+          batch.ref_structure,
+          mask=new_ref_mask,
+          positions=new_ref_pos,
+      ),
+  )
+
+
+def _trim_square_matrix(
+    arr: np.ndarray,
+    keep_token_idxs: np.ndarray,
+) -> np.ndarray:
+  """Trims a [N, N] or [S, N, N] matrix to the kept token indices."""
+  arr = np.asarray(arr)
+  if arr.ndim == 2:
+    return arr[np.ix_(keep_token_idxs, keep_token_idxs)]
+  if arr.ndim == 3:
+    return arr[:, keep_token_idxs][:, :, keep_token_idxs]
+  raise ValueError(f'Expected rank-2 or rank-3 square matrix, got {arr.ndim}.')
+
+
 class Model(hk.Module):
   """Full model. Takes in data batch and returns model outputs."""
 
@@ -224,6 +284,14 @@ class Model(hk.Module):
     heads: 'Model.HeadsConfig' = base_config.autocreate()
     num_recycles: int = 10
     return_embeddings: bool = False
+    return_distogram: bool = False
+    # Experimental: skip Evoformer and use pre-computed embeddings from the batch
+    # dict under keys '__injected_single__' and '__injected_pair__'.
+    inject_embeddings: bool = False
+    # Control experiment: zero XL token embeddings (is_crosslinker) and masks
+    # before diffusion, so XL atoms are left out of the predicted structure
+    # while still informing the Evoformer pair/single representations.
+    ablate_crosslinkers: bool = False
 
   def __init__(self, config: Config, name: str = 'diffuser'):
     super().__init__(name=name)
@@ -262,13 +330,18 @@ class Model(hk.Module):
     if key is None:
       key = hk.next_rng_key()
 
+    # Extract injected embeddings BEFORE batch conversion — they live only in the
+    # raw dict and are not part of feat_batch.Batch.
+    injected_single = batch.get('__injected_single__') if isinstance(batch, dict) else None
+    injected_pair = batch.get('__injected_pair__') if isinstance(batch, dict) else None
+
     batch = feat_batch.Batch.from_data_dict(batch)
 
     embedding_module = evoformer_network.Evoformer(
         self.config.evoformer, self.global_config
     )
     target_feat = create_target_feat_embedding(
-        batch=batch,
+        batch=batch,  # pyrefly: ignore[bad-argument-type]
         config=embedding_module.config,
         global_config=self.global_config,
     )
@@ -286,27 +359,52 @@ class Model(hk.Module):
       embeddings['single'] = embeddings['single'].astype(jnp.float32)
       return embeddings, key
 
-    num_res = batch.num_res
+    num_res = batch.num_res  # pyrefly: ignore[missing-attribute]
 
-    embeddings = {
-        'pair': jnp.zeros(
-            [num_res, num_res, self.config.evoformer.pair_channel],
-            dtype=jnp.float32,
-        ),
-        'single': jnp.zeros(
-            [num_res, self.config.evoformer.seq_channel], dtype=jnp.float32
-        ),
-        'target_feat': target_feat,
-    }
-    if hk.running_init():
-      embeddings, _ = recycle_body(None, (embeddings, key))
+    if self.config.inject_embeddings and injected_single is not None:
+      # Skip Evoformer — use caller-supplied embeddings directly.
+      embeddings = {
+          'pair': jnp.asarray(injected_pair, dtype=jnp.float32),
+          'single': jnp.asarray(injected_single, dtype=jnp.float32),
+          'target_feat': target_feat,
+      }
     else:
-      # Number of recycles is number of additional forward trunk passes.
-      num_iter = self.config.num_recycles + 1
-      embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
+      embeddings = {
+          'pair': jnp.zeros(
+              [num_res, num_res, self.config.evoformer.pair_channel],
+              dtype=jnp.float32,
+          ),
+          'single': jnp.zeros(
+              [num_res, self.config.evoformer.seq_channel], dtype=jnp.float32
+          ),
+          'target_feat': target_feat,
+      }
+      if hk.running_init():
+        embeddings, _ = recycle_body(None, (embeddings, key))
+      else:
+        # Number of recycles is number of additional forward trunk passes.
+        num_iter = self.config.num_recycles + 1
+        embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
+
+    if self.config.ablate_crosslinkers:
+      # Zero XL token embeddings and masks before diffusion so XL atoms are
+      # excluded from the predicted structure while still informing the
+      # Evoformer pair/single representations.
+      xl = batch.token_features.is_crosslinker.astype(jnp.float32)  # (N,)
+      not_xl = 1.0 - xl
+      embeddings = dict(embeddings)  # shallow copy — do not mutate original
+      embeddings['single'] = embeddings['single'] * not_xl[:, None]
+      embeddings['pair'] = (
+          embeddings['pair'] * not_xl[:, None, None] * not_xl[None, :, None]
+      )
+      embeddings['target_feat'] = embeddings['target_feat'] * not_xl[:, None]
+      batch = _ablate_crosslinkers_in_batch(
+          batch=batch,
+          is_crosslinker=batch.token_features.is_crosslinker,
+      )
 
     samples = self._sample_diffusion(
-        batch,
+        batch,  # pyrefly: ignore[bad-argument-type]
         embeddings,
         sample_config=self.config.heads.diffusion.eval,
     )
@@ -318,22 +416,24 @@ class Model(hk.Module):
         )(
             dense_atom_positions=dense_atom_positions,
             embeddings=embeddings,
-            seq_mask=batch.token_features.mask,
-            token_atoms_to_pseudo_beta=batch.pseudo_beta_info.token_atoms_to_pseudo_beta,
-            asym_id=batch.token_features.asym_id,
+            seq_mask=batch.token_features.mask,  # pyrefly: ignore[missing-attribute]
+            token_atoms_to_pseudo_beta=batch.pseudo_beta_info.token_atoms_to_pseudo_beta,  # pyrefly: ignore[missing-attribute]
+            asym_id=batch.token_features.asym_id,  # pyrefly: ignore[missing-attribute]
         ),
         in_axes=0,
     )(samples['atom_positions'])
 
     distogram = distogram_head.DistogramHead(
         self.config.heads.distogram, self.global_config
-    )(batch, embeddings)
+    )(batch, embeddings, return_distogram=self.config.return_distogram)
 
     output = {
         'diffusion_samples': samples,
         'distogram': distogram,
         **confidence_output,
     }
+    if self.config.ablate_crosslinkers:
+      output['__ablate_crosslinkers__'] = jnp.asarray(True)
     if self.config.return_embeddings:
       output['single_embeddings'] = embeddings['single']
       output['pair_embeddings'] = embeddings['pair']
@@ -364,39 +464,75 @@ class Model(hk.Module):
     """
     del target_name
     batch = feat_batch.Batch.from_data_dict(batch)
+    num_tokens = batch.token_features.seq_length.item()
+    ablate_crosslinkers = bool(
+        np.asarray(result.get('__ablate_crosslinkers__', False)).item()
+    )
+    if ablate_crosslinkers:
+      batch = _ablate_crosslinkers_in_batch(
+          batch=batch,
+          is_crosslinker=batch.token_features.is_crosslinker,
+      )
 
     # Retrieve structure and construct a predicted structure.
     pred_structure = get_predicted_structure(result=result, batch=batch)
+    asym_ids_full = batch.token_features.asym_id[:num_tokens]
+    res_ids_full = batch.token_features.residue_index[:num_tokens]
+    chain_ids_full = [pred_structure.chains[asym_id - 1] for asym_id in asym_ids_full]
+    keep_token_idxs = np.arange(num_tokens)
+    if ablate_crosslinkers:
+      is_crosslinker = np.asarray(
+          batch.token_features.is_crosslinker[:num_tokens]
+      ).astype(bool)
+      keep_token_idxs = np.flatnonzero(~is_crosslinker)
+      xl_chain_ids = sorted({chain_ids_full[idx] for idx in np.flatnonzero(is_crosslinker)})
+      if xl_chain_ids:
+        pred_structure = pred_structure.filter_out(chain_id=xl_chain_ids)
 
-    num_tokens = batch.token_features.seq_length.item()
-
-    pae_single_mask = np.tile(
-        batch.frames.mask[:, None],
-        [1, batch.frames.mask.shape[0]],
+    asym_ids = asym_ids_full[keep_token_idxs]
+    res_ids = res_ids_full[keep_token_idxs]
+    chain_ids = [chain_ids_full[idx] for idx in keep_token_idxs]
+    num_tokens = len(keep_token_idxs)
+    frames_mask = np.asarray(batch.frames.mask[: batch.frames.mask.shape[0]])[
+        keep_token_idxs
+    ]
+    pae_single_mask = np.tile(frames_mask[:, None], [1, num_tokens])
+    full_pae = _trim_square_matrix(result['full_pae'], keep_token_idxs)
+    full_pde = _trim_square_matrix(result['full_pde'], keep_token_idxs)
+    contact_probs = _trim_square_matrix(
+        result['distogram']['contact_probs'], keep_token_idxs
     )
-    ptm = _compute_ptm(
-        result=result,
-        num_tokens=num_tokens,
-        asym_id=batch.token_features.asym_id[:num_tokens],
-        pae_single_mask=pae_single_mask,
-        interface=False,
+    tmscore_adjusted_pae_global = _trim_square_matrix(
+        result['tmscore_adjusted_pae_global'], keep_token_idxs
     )
-    iptm = _compute_ptm(
-        result=result,
-        num_tokens=num_tokens,
-        asym_id=batch.token_features.asym_id[:num_tokens],
-        pae_single_mask=pae_single_mask,
-        interface=True,
+    tmscore_adjusted_pae_interface = _trim_square_matrix(
+        result['tmscore_adjusted_pae_interface'], keep_token_idxs
+    )
+    ptm = np.stack(
+        [
+            confidences.predicted_tm_score(
+                tm_adjusted_pae=sample_tm_adjusted_pae,
+                asym_id=asym_ids,
+                pair_mask=pae_single_mask,
+                interface=False,
+            )
+            for sample_tm_adjusted_pae in tmscore_adjusted_pae_global
+        ],
+        axis=0,
+    )
+    iptm = np.stack(
+        [
+            confidences.predicted_tm_score(
+                tm_adjusted_pae=sample_tm_adjusted_pae,
+                asym_id=asym_ids,
+                pair_mask=pae_single_mask,
+                interface=True,
+            )
+            for sample_tm_adjusted_pae in tmscore_adjusted_pae_interface
+        ],
+        axis=0,
     )
     ptm_iptm_average = 0.8 * iptm + 0.2 * ptm
-
-    asym_ids = batch.token_features.asym_id[:num_tokens]
-    # Map asym IDs back to chain IDs. Asym IDs are constructed from chain IDs by
-    # iterating over the chain IDs, and for each unique chain ID incrementing
-    # the asym ID by 1 and mapping it to the particular chain ID. Asym IDs are
-    # 1-indexed, so subtract 1 to get back to the chain ID.
-    chain_ids = [pred_structure.chains[asym_id - 1] for asym_id in asym_ids]
-    res_ids = batch.token_features.residue_index[:num_tokens]
 
     if len(np.unique(asym_ids[:num_tokens])) > 1:
       # There is more than one chain, hence interface pTM (i.e. ipTM) defined,
@@ -406,42 +542,41 @@ class Model(hk.Module):
       # There is only one chain, hence ipTM=NaN, so use just pTM.
       ranking_confidence = ptm
 
-    contact_probs = result['distogram']['contact_probs']
     # Compute PAE related summaries.
     _, chain_pair_pae_min, _ = confidences.chain_pair_pae(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pae=result['full_pae'],
+        asym_ids=asym_ids,
+        full_pae=full_pae,
         mask=pae_single_mask,
     )
     chain_pair_pde_mean, chain_pair_pde_min = confidences.chain_pair_pde(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pde=result['full_pde'],
+        asym_ids=asym_ids,
+        full_pde=full_pde,
     )
     intra_chain_single_pde, cross_chain_single_pde, _ = confidences.pde_single(
         num_tokens,
-        batch.token_features.asym_id,
-        result['full_pde'],
+        asym_ids,
+        full_pde,
         contact_probs,
     )
     pae_metrics = confidences.pae_metrics(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
-        full_pae=result['full_pae'],
+        asym_ids=asym_ids,
+        full_pae=full_pae,
         mask=pae_single_mask,
         contact_probs=contact_probs,
-        tm_adjusted_pae=result['tmscore_adjusted_pae_interface'],
+        tm_adjusted_pae=tmscore_adjusted_pae_interface,
     )
     ranking_confidence_pae = confidences.rank_metric(
-        result['full_pae'],
-        contact_probs * batch.frames.mask[:, None].astype(float),
+        full_pae,
+        contact_probs * frames_mask[:, None].astype(float),
     )
     chain_pair_iptm = _compute_chain_pair_iptm(
         num_tokens=num_tokens,
-        asym_ids=batch.token_features.asym_id,
+        asym_ids=asym_ids,
         mask=pae_single_mask,
-        tm_adjusted_pae=result['tmscore_adjusted_pae_interface'],
+        tm_adjusted_pae=tmscore_adjusted_pae_interface,
     )
     # iptm_ichain is a vector of per-chain ptm values. iptm_ichain[0],
     # for example, is just the zeroth diagonal entry of the chain pair iptm
@@ -463,9 +598,8 @@ class Model(hk.Module):
     # Computing solvent accessible area with dssp can be slow for large
     # structures with lots of chains, so we parallelize the call.
     pred_structures = pred_structure.unstack()
-    num_workers = len(pred_structures)
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=num_workers
+        max_workers=min(len(pred_structures), 32)
     ) as executor:
       has_clash = list(executor.map(confidences.has_clash, pred_structures))
       fraction_disordered = list(
@@ -482,9 +616,9 @@ class Model(hk.Module):
       yield InferenceResult(
           predicted_structure=pred_structure,
           numerical_data={
-              'full_pde': result['full_pde'][idx, :num_tokens, :num_tokens],
-              'full_pae': result['full_pae'][idx, :num_tokens, :num_tokens],
-              'contact_probs': contact_probs[:num_tokens, :num_tokens],
+              'full_pde': full_pde[idx],
+              'full_pae': full_pae[idx],
+              'contact_probs': contact_probs,
           },
           metadata={
               'predicted_distance_error': predicted_distance_errors[idx],
@@ -504,11 +638,11 @@ class Model(hk.Module):
               'pae_ichain': pae_metrics['pae_ichain'][idx],
               'pae_xchain': pae_metrics['pae_xchain'][idx],
               'ranking_confidence': ranking_confidence[idx],
-              'ranking_confidence_pae': ranking_confidence_pae[idx],
+              'ranking_confidence_pae': ranking_confidence_pae[idx],  # pyrefly: ignore[bad-assignment]
               'chain_pair_iptm': chain_pair_iptm[idx],
               'iptm_ichain': iptm_ichain[idx],
               'iptm_xchain': iptm_xchain[idx],
-              'token_chain_ids': chain_ids,
+              'token_chain_ids': chain_ids,  # pyrefly: ignore[bad-assignment]
               'token_res_ids': res_ids,
           },
           model_id=result['__identifier__'],

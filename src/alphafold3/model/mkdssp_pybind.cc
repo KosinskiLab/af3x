@@ -1,7 +1,16 @@
 // Copyright 2024 DeepMind Technologies Limited
 //
-// AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-// this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+// AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // To request access to the AlphaFold 3 model parameters, follow the process set
 // out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -25,22 +34,25 @@ namespace alphafold3 {
 namespace py = pybind11;
 
 void RegisterModuleMkdssp(pybind11::module m) {
-  py::module site = py::module::import("site");
-  py::list paths = py::cast<py::list>(site.attr("getsitepackages")());
-  // Find the first path that contains the libcifpp components.cif file.
-  bool found = false;
-  for (const auto& py_path : paths) {
-    auto path_str =
-        std::filesystem::path(py::cast<absl::string_view>(py_path)) /
-        "share/libcifpp/components.cif";
-    if (std::filesystem::exists(path_str)) {
-      setenv("LIBCIFPP_DATA_DIR", path_str.parent_path().c_str(), 0);
-      found = true;
-      break;
+  if (!getenv("LIBCIFPP_DATA_DIR")) {
+    py::module site = py::module::import("site");
+    py::list paths = py::cast<py::list>(site.attr("getsitepackages")());
+    // Find the first path that contains the libcifpp components.cif file.
+    bool found = false;
+    for (const auto& py_path : paths) {
+      auto path_str =
+          std::filesystem::path(py::cast<absl::string_view>(py_path)) /
+          "share/libcifpp/components.cif";
+      if (std::filesystem::exists(path_str)) {
+        setenv("LIBCIFPP_DATA_DIR", path_str.parent_path().c_str(), 0);
+        found = true;
+        break;
+      }
     }
-  }
-  if (!found) {
-    throw py::type_error("Could not find the libcifpp components.cif file.");
+    if (!found) {
+      throw py::type_error(
+        "Could not find the libcifpp components.cif file.");
+    }
   }
   m.def(
       "get_dssp",
@@ -59,5 +71,4 @@ void RegisterModuleMkdssp(pybind11::module m) {
       py::arg("calculate_surface_accessibility") = false,
       py::doc("Gets secondary structure from an mmCIF file."));
 }
-
 }  // namespace alphafold3

@@ -1,3 +1,5 @@
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
+
 [build-system]
 requires = [
     "scikit_build_core",
@@ -10,29 +12,43 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "alphafold3"
-version = "3.0.1"
-requires-python = ">=3.11"
+dynamic = ["version"]
+requires-python = ">=3.12"
 readme = "README.md"
 license = {file = "LICENSE"}
 dependencies = [
-    "absl-py",
-    "chex",
-    "dm-haiku==0.0.13",
-    "dm-tree",
-    "jax==0.4.34",
-    "jax[cuda12]==0.4.34",
-    "jax-triton==0.2.0",
-    "jaxtyping==0.2.34",
+    "absl-py>=2.3.1",
+    "dm-haiku==0.0.17",
+    "etils[epath]",
+    "jax==0.10.2",
+    "jax[cuda12]==0.10.2; sys_platform != 'darwin'",
+    "jax-mps==0.10.9; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "msgpack",
     "numpy",
-    "rdkit==2024.3.5",
-    "triton==3.1.0",
+    "rdkit==2026.3.3",
+    "tokamax==0.0.12",
     "tqdm",
-    "typeguard==2.13.3",
     "zstandard",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=6.0"]
+gcsfs = [
+  # Use `uv sync --extra gcsfs` to enable GCS paths for inputs and outputs
+  "gcsfs",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=6.0",
+]
+
+[tool.uv]
+package = true
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
 
 [tool.scikit-build]
 wheel.exclude = [
@@ -47,6 +63,13 @@ sdist.include = [
     "WEIGHTS_PROHIBITED_USE_POLICY.md",
     "WEIGHTS_TERMS_OF_USE.md",
 ]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.setuptools_scm]
+fallback_version = "3.0.5"
+# Package version from AF3x tags (af3x-vX.Y.Z) only; upstream v* tags are ignored.
+tag_regex = '^af3x-v(?P<version>\d+(?:\.\d+){0,2})$'
+scm.git.describe_command = "git describe --dirty --tags --long --match af3x-v*"
 
 [tool.cibuildwheel]
 build = "cp3*-manylinux_x86_64"
@@ -54,3 +77,7 @@ manylinux-x86_64-image = "manylinux_2_28"
 
 [project.scripts]
 build_data = "alphafold3.build_data:build_data"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = ["--import-mode=importlib"]

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -11,13 +20,13 @@
 """Diffusion transformer model."""
 
 from alphafold3.common import base_config
-from alphafold3.jax.gated_linear_unit import gated_linear_unit
 from alphafold3.model import model_config
 from alphafold3.model.atom_layout import atom_layout
 from alphafold3.model.components import haiku_modules as hm
 import haiku as hk
 import jax
 from jax import numpy as jnp
+import tokamax
 
 
 def adaptive_layernorm(x, single_cond, name):
@@ -97,9 +106,7 @@ def transition_block(
         name=f'{name}ffw_transition1',
     )
     weights = jnp.reshape(weights, (len(weights), 2, num_intermediates))
-    c = gated_linear_unit.gated_linear_unit(
-        x=x, weight=weights, implementation=None, activation=jax.nn.swish
-    )
+    c = tokamax.gated_linear_unit(x=x, weights=weights, activation=jax.nn.swish)
   else:
     x = hm.Linear(
         num_intermediates * 2, initializer='relu', name=f'{name}ffw_transition1'
@@ -366,7 +373,7 @@ class CrossAttTransformer(hk.Module):
       # cross attention
       queries_act += cross_attention(
           x_q=queries_act,
-          x_k=keys_act,
+          x_k=keys_act,  # pyrefly: ignore[bad-argument-type]
           mask_q=queries_mask,
           mask_k=keys_mask,
           config=self.config.attention,

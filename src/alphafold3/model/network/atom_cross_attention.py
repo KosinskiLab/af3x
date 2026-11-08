@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -9,6 +18,7 @@
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
 
 """Per-atom cross attention."""
+import dataclasses
 
 from alphafold3.common import base_config
 from alphafold3.model import feat_batch
@@ -17,7 +27,6 @@ from alphafold3.model.atom_layout import atom_layout
 from alphafold3.model.components import haiku_modules as hm
 from alphafold3.model.components import utils
 from alphafold3.model.network import diffusion_transformer
-import chex
 import jax
 import jax.numpy as jnp
 
@@ -96,7 +105,7 @@ def _per_atom_conditioning(
   return act, pair_act
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AtomCrossAttEncoderOutput:
   token_act: jnp.ndarray  # (num_tokens, ch)
   skip_connection: jnp.ndarray  # (num_subsets, num_queries, ch)
@@ -105,6 +114,13 @@ class AtomCrossAttEncoderOutput:
   keys_mask: jnp.ndarray  # (num_subsets, num_keys)
   keys_single_cond: jnp.ndarray  # (num_subsets, num_keys, ch)
   pair_cond: jnp.ndarray  # (num_subsets, num_queries, num_keys, ch)
+
+
+jax.tree_util.register_dataclass(
+    AtomCrossAttEncoderOutput,
+    data_fields=[f.name for f in dataclasses.fields(AtomCrossAttEncoderOutput)],
+    meta_fields=[],
+)
 
 
 def atom_cross_att_encoder(
@@ -324,22 +340,22 @@ def atom_cross_att_encoder(
   queries_act = hm.Linear(
       c.per_token_channels, name=f'{name}_project_atom_features_for_aggr'
   )(queries_act)
-  token_atoms_act = atom_layout.convert(
+  token_atoms_act = atom_layout.convert(  # pyrefly: ignore[bad-assignment]
       batch.atom_cross_att.queries_to_token_atoms,
       queries_act,
       layout_axes=(-3, -2),
   )
   token_act = utils.mask_mean(
-      token_atoms_mask[..., None], jax.nn.relu(token_atoms_act), axis=-2
+      token_atoms_mask[..., None], jax.nn.relu(token_atoms_act), axis=-2  # pyrefly: ignore[bad-argument-type]
   )
 
   return AtomCrossAttEncoderOutput(
       token_act=token_act,
       skip_connection=skip_connection,
-      queries_mask=queries_mask,
-      queries_single_cond=queries_single_cond,
-      keys_mask=keys_mask,
-      keys_single_cond=keys_single_cond,
+      queries_mask=queries_mask,  # pyrefly: ignore[bad-argument-type]
+      queries_single_cond=queries_single_cond,  # pyrefly: ignore[bad-argument-type]
+      keys_mask=keys_mask,  # pyrefly: ignore[bad-argument-type]
+      keys_single_cond=keys_single_cond,  # pyrefly: ignore[bad-argument-type]
       pair_cond=pair_act,
   )
 

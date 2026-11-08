@@ -1,7 +1,16 @@
 // Copyright 2024 DeepMind Technologies Limited
 //
-// AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-// this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+// AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // To request access to the AlphaFold 3 model parameters, follow the process set
 // out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -372,13 +381,16 @@ void RegisterModuleCifDict(pybind11::module m) {
   using Value = std::vector<std::string>;
   static absl::NoDestructor<std::vector<std::string>> empty_values;
 
-  m.def("from_string", [](absl::string_view s) {
-    absl::StatusOr<CifDict> dict = CifDict::FromString(s);
-    if (!dict.ok()) {
-      throw py::value_error(dict.status().ToString());
-    }
-    return CifDict(std::move(*dict));
-  });
+  m.def(
+      "from_string",
+      [](absl::string_view s) {
+        absl::StatusOr<CifDict> dict = CifDict::FromString(s);
+        if (!dict.ok()) {
+          throw py::value_error(dict.status().ToString());
+        }
+        return *dict;
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def(
       "tokenize",
@@ -457,6 +469,16 @@ void RegisterModuleCifDict(pybind11::module m) {
                 return *result;
               },
               "Serialize to a string", py::call_guard<py::gil_scoped_release>())
+          .def(
+              "to_dict",
+              [](const CifDict& self) {
+                py::dict result;
+                for (const auto& [key, value] : *self.dict()) {
+                  result[py::cast(key)] = py::cast(value);
+                }
+                return result;
+              },
+              "Returns the CIF data as a Python dict[str, list[str]].")
           .def("value_length", &CifDict::ValueLength, py::arg("key"),
                "Num elements in value")
           .def("__len__",
@@ -603,10 +625,12 @@ void RegisterModuleCifDict(pybind11::module m) {
           py::keep_alive<0, 1>());
 
   py::class_<KeyView>(cif_dict, "KeyView")
-      .def("__contains__",
-           [](const KeyView& v, absl::string_view k) {
-             return v.map.dict()->find(k) != v.map.dict()->end();
-           })
+      .def(
+          "__contains__",
+          [](const KeyView& v, absl::string_view k) {
+            return v.map.dict()->find(k) != v.map.dict()->end();
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def("__contains__", [](const KeyView&, py::handle) { return false; })
       .def("__len__", [](const KeyView& v) { return v.map.dict()->size(); })
       .def(
@@ -630,19 +654,19 @@ void RegisterModuleCifDict(pybind11::module m) {
   cif_dict
       .def(
           "__iter__",
-          [](CifDict& self) {
+          [](const CifDict& self) {
             return py::make_key_iterator(self.dict()->begin(),
                                          self.dict()->end());
           },
           py::keep_alive<0, 1>())
       .def(
-          "keys", [](CifDict& self) { return KeyView{self}; },
+          "keys", [](const CifDict& self) { return KeyView{self}; },
           "Returns an iterable view of the map's keys.")
       .def(
-          "values", [](CifDict& self) { return ValueView{self}; },
+          "values", [](const CifDict& self) { return ValueView{self}; },
           "Returns an iterable view of the map's values.")
       .def(
-          "items", [](CifDict& self) { return ItemView{self}; },
+          "items", [](const CifDict& self) { return ItemView{self}; },
           "Returns an iterable view of the map's items.");
 }
 

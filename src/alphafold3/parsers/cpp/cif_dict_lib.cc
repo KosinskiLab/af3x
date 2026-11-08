@@ -1,7 +1,16 @@
 // Copyright 2024 DeepMind Technologies Limited
 //
-// AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-// this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+// AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // To request access to the AlphaFold 3 model parameters, follow the process set
 // out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -11,7 +20,6 @@
 #include "alphafold3/parsers/cpp/cif_dict_lib.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <iterator>
 #include <memory>
@@ -21,6 +29,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/attributes.h"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -32,7 +41,6 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
@@ -40,50 +48,48 @@
 namespace alphafold3 {
 namespace {
 
+// Cap initial _atom_site.* vector reserves to avoid multi-GB RSS spikes on
+// large mmCIFs.
+constexpr size_t kMaxInitialAtomSiteReserve = 65536;
+
 bool IsQuote(const char symbol) { return symbol == '\'' || symbol == '"'; }
 bool IsWhitespace(const char symbol) { return symbol == ' ' || symbol == '\t'; }
 
-// Splits line into tokens, returns whether successful.
-bool SplitLineInline(absl::string_view line,
-                     std::vector<absl::string_view>* tokens) {
+// Splits line into tokens and invokes on_token for each token.
+template <typename TokenFn>
+ABSL_ATTRIBUTE_ALWAYS_INLINE absl::Status SplitLineInline(
+    absl::string_view line, TokenFn&& on_token) {
+  const char* const data = line.data();
+  const size_t line_length = line.size();
   // See https://www.iucr.org/resources/cif/spec/version1.1/cifsyntax
-  for (int i = 0, line_length = line.length(); i < line_length;) {
+  for (size_t i = 0; i < line_length;) {
     // Skip whitespace (spaces or tabs).
-    while (IsWhitespace(line[i])) {
-      if (++i == line_length) {
-        break;
-      }
+    while (i < line_length && IsWhitespace(data[i])) {
+      ++i;
     }
-    if (i == line_length) {
-      break;
-    }
-
     // Skip comments (from # until the end of the line). If # is a non-comment
     // character, it must be inside a quoted token.
-    if (line[i] == '#') {
+    if (i == line_length || data[i] == '#') {
       break;
     }
 
-    int start_index;
-    int end_index;
-    if (IsQuote(line[i])) {
+    size_t start_index;
+    size_t end_index;
+    if (IsQuote(data[i])) {
       // Token in single or double quotes. CIF v1.1 specification considers a
       // quote to be an opening quote only if it is at the beginning of a token.
       // So e.g. A' B has tokens A' and B. Also, ""A" is a token "A.
-      const char quote_char = line[i++];
+      const char quote_char = data[i++];
       start_index = i;
 
-      // Find matching quote. The double loop is not strictly necessary, but
-      // optimises a bit better.
       while (true) {
-        while (i < line_length && line[i] != quote_char) {
-          ++i;
-        }
-        if (i == line_length) {
+        i = line.find(quote_char, i);
+        if (i == absl::string_view::npos) {
           // Reached the end of the line while still being inside a token.
-          return false;
+          return absl::InvalidArgumentError(
+              absl::StrCat("Line ended with quote open: ", line));
         }
-        if (i + 1 == line_length || IsWhitespace(line[i + 1])) {
+        if (i + 1 == line_length || IsWhitespace(data[i + 1])) {
           break;
         }
         ++i;
@@ -92,75 +98,118 @@ bool SplitLineInline(absl::string_view line,
     } else {
       // Non-quoted token. Read until reaching whitespace.
       start_index = i++;
-      while (i < line_length && !IsWhitespace(line[i])) {
+      while (i < line_length && !IsWhitespace(data[i])) {
         ++i;
       }
       end_index = i;
     }
 
-    tokens->push_back(line.substr(start_index, end_index - start_index));
+    absl::Status on_token_status = on_token(
+        absl::string_view(data + start_index, end_index - start_index));
+    if (!on_token_status.ok()) {
+      return on_token_status;
+    }
   }
 
-  return true;
+  return absl::OkStatus();
 }
 
-using HeapStrings = std::vector<std::unique_ptr<std::string>>;
+template <typename TokenFn>
+ABSL_ATTRIBUTE_ALWAYS_INLINE absl::Status TokenizeInternal(
+    absl::string_view cif_string, TokenFn&& on_token) {
+  size_t pos = 0;
+  auto next_line = [&](absl::string_view& line) -> bool {
+    if (pos > cif_string.size()) {
+      return false;
+    }
+    const size_t nl = cif_string.find('\n', pos);
+    if (nl == absl::string_view::npos) {
+      line = cif_string.substr(pos);
+      pos = cif_string.size() + 1;
+    } else {
+      line = cif_string.substr(pos, nl - pos);
+      pos = nl + 1;
+    }
+    return true;
+  };
 
-// The majority of strings can be viewed on original cif_string.
-// heap_strings store multi-line tokens that have internal white-space stripped.
-absl::StatusOr<std::vector<absl::string_view>> TokenizeInternal(
-    absl::string_view cif_string, HeapStrings* heap_strings) {
-  const std::vector<absl::string_view> lines = absl::StrSplit(cif_string, '\n');
-  std::vector<absl::string_view> tokens;
-  // Heuristic: Most lines in an mmCIF are _atom_site lines with 21 tokens.
-  tokens.reserve(lines.size() * 21);
-  int line_num = 0;
-  while (line_num < lines.size()) {
-    auto line = lines[line_num];
-    line_num++;
-
+  std::string multiline_buffer;
+  absl::string_view line;
+  while (next_line(line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.remove_suffix(1);
+    }
     if (line.empty() || line[0] == '#') {
       // Skip empty lines or lines that contain only comments.
       continue;
     } else if (line[0] == ';') {
       // Leading whitespace on each line must be preserved while trailing
       // whitespace may be stripped.
-      std::vector<absl::string_view> multiline_tokens;
-      // Strip the leading ";".
-      multiline_tokens.push_back(
-          absl::StripTrailingAsciiWhitespace(line.substr(1)));
-      while (line_num < lines.size()) {
-        auto multiline = absl::StripTrailingAsciiWhitespace(lines[line_num]);
-        line_num++;
+      multiline_buffer.clear();
+      const absl::string_view first =
+          absl::StripTrailingAsciiWhitespace(line.substr(1));
+      multiline_buffer.append(first);
+      bool terminated = false;
+      absl::string_view next_raw;
+      while (next_line(next_raw)) {
+        auto multiline = absl::StripTrailingAsciiWhitespace(next_raw);
         if (!multiline.empty() && multiline[0] == ';') {
+          terminated = true;
           break;
         }
-        multiline_tokens.push_back(multiline);
+        absl::StrAppend(&multiline_buffer, "\n", multiline);
       }
-      heap_strings->push_back(
-          std::make_unique<std::string>(absl::StrJoin(multiline_tokens, "\n")));
-      tokens.emplace_back(*heap_strings->back());
-    } else {
-      if (!SplitLineInline(line, &tokens)) {
+      if (!terminated) {
         return absl::InvalidArgumentError(
-            absl::StrCat("Line ended with quote open: ", line));
+            "Last multiline token is not terminated by a semicolon.");
+      }
+      absl::Status on_token_status = on_token(multiline_buffer);
+      if (!on_token_status.ok()) {
+        return on_token_status;
+      }
+    } else {
+      absl::Status on_token_status = SplitLineInline(line, on_token);
+      if (!on_token_status.ok()) {
+        return on_token_status;
       }
     }
   }
-  return tokens;
+  return absl::OkStatus();
+}
+
+// Returns whether the token doesn't need any quoting. This is true if the token
+// isn't empty and contains only safe characters [A-Za-z0-9.?-].
+bool IsTrivialToken(const absl::string_view value) {
+  if (value.empty()) {
+    return false;
+  }
+
+  return absl::c_all_of(value, [](char c) {
+    return absl::ascii_isalnum(c) || c == '.' || c == '?' || c == '-';
+  });
+}
+
+// Returns whether the token needs to be a multiline token. This happens if it
+// has a newline or both single and double quotes.
+bool IsMultiLineToken(const absl::string_view value) {
+  bool has_single_quotes = false;
+  bool has_double_quotes = false;
+  for (const char c : value) {
+    if (c == '\n') {
+      return true;
+    } else if (c == '\'') {
+      has_single_quotes = true;
+    } else if (c == '"') {
+      has_double_quotes = true;
+    }
+  }
+  return has_single_quotes && has_double_quotes;
 }
 
 absl::string_view GetEscapeQuote(const absl::string_view value) {
   // Empty values should not happen, but if so, they should be quoted.
   if (value.empty()) {
     return "\"";
-  }
-
-  // Shortcut for the most common cases where no quoting needed.
-  if (std::all_of(value.begin(), value.end(), [](char c) {
-        return absl::ascii_isalnum(c) || c == '.' || c == '?' || c == '-';
-      })) {
-    return "";
   }
 
   // The value must not start with one of these CIF keywords.
@@ -179,13 +228,26 @@ absl::string_view GetEscapeQuote(const absl::string_view value) {
     return "\"";
   }
 
-  // No quotes or whitespace allowed inside.
+  // No quotes or whitespace allowed inside. Rare case when both double and
+  // single quotes are present is handled by IsMultiLineToken.
+  bool use_double_quote = true;
+  bool use_single_quote = true;
+  bool needs_quote = false;
   for (const char c : value) {
-    if (c == '"') {
-      return "'";
-    } else if (c == '\'' || c == ' ' || c == '\t') {
-      return "\"";
+    if (c == ' ' || c == '\t') {
+      needs_quote = true;
+    } else if (c == '"') {
+      needs_quote = true;
+      use_double_quote = false;
+    } else if (c == '\'') {
+      needs_quote = true;
+      use_single_quote = false;
     }
+  }
+  if (needs_quote && use_double_quote) {
+    return "\"";
+  } else if (needs_quote && use_single_quote) {
+    return "'";
   }
   return "";
 }
@@ -254,7 +316,11 @@ class Column {
     int max_value_length = 0;
     for (size_t i = 0; i < values->size(); ++i) {
       absl::string_view value = (*values)[i];
-      if (absl::StrContains(value, '\n')) {
+      if (IsTrivialToken(value)) {
+        // Shortcut for the most common cases where no quoting/multiline needed.
+        max_value_length = std::max<int>(max_value_length, value.size());
+        continue;
+      } else if (IsMultiLineToken(value)) {
         values_with_newlines_.insert(i);
       } else {
         absl::string_view quote = GetEscapeQuote(value);
@@ -301,77 +367,97 @@ struct GroupedKeys {
   int value_size;
 };
 
+absl::Status CheckLoopColumnSizes(int num_loop_keys, int num_loop_values) {
+  if ((num_loop_keys > 0) && (num_loop_values % num_loop_keys != 0)) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "The number of values (%d) in a loop is not a multiple of the "
+        "number of the loop's columns (%d)",
+        num_loop_values, num_loop_keys));
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace
 
 absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
   CifDict::Dict cif;
 
+  bool is_first_token = true;
   bool loop_flag = false;
-  absl::string_view key;
-
-  HeapStrings heap_strings;
-  auto tokens = TokenizeInternal(cif_string, &heap_strings);
-  if (!tokens.ok()) {
-    return tokens.status();
-  }
-
-  if (tokens->empty()) {
-    return absl::InvalidArgumentError("The CIF file must not be empty.");
-  }
-
-  // The first token should be data_XXX. Split into key = data, value = XXX.
-  absl::string_view first_token = tokens->front();
-  if (!absl::ConsumePrefix(&first_token, "data_")) {
-    return absl::InvalidArgumentError(
-        "The CIF file does not start with the data_ field.");
-  }
-  cif["data_"].emplace_back(first_token);
+  std::string key;
 
   // Counters for CIF loop_ regions.
-  int loop_token_index = 0;
   int num_loop_keys = 0;
   // Loops have usually O(10) columns but could have up to O(10^6) rows. It is
   // therefore wasteful to look up the cif vector where to add a loop value
   // since that means doing `columns * rows` map lookups. If we save pointers to
   // these loop column fields instead, we need only 1 cif lookup per column.
   std::vector<std::vector<std::string>*> loop_column_values;
+  // Use a resetting column index instead of computing modulo on every token.
+  // This is the hot path for _atom_site tables with millions of values.
+  int token_column_index = 0;
+  // Total number of loop values seen (for column size validation).
+  int loop_token_count = 0;
 
-  // Skip the first element since we already processed it above.
-  for (auto token_itr = tokens->begin() + 1; token_itr != tokens->end();
-       ++token_itr) {
-    auto token = *token_itr;
-    if (absl::EqualsIgnoreCase(token, "loop_")) {
-      // A new loop started, get rid of old loop's data.
+  auto process_token = [&](absl::string_view token)
+                           ABSL_ATTRIBUTE_ALWAYS_INLINE -> absl::Status {
+    if (is_first_token) {
+      is_first_token = false;
+      // The first token should be data_XXX. Split into key = data, value = XXX.
+      if (!absl::ConsumePrefix(&token, "data_")) {
+        return absl::InvalidArgumentError(
+            "The CIF file does not start with the data_ field.");
+      }
+      if (token.empty()) {
+        return absl::InvalidArgumentError(
+            "The CIF file does not contain a data block name.");
+      }
+      cif["data_"].emplace_back(token);
+      return absl::OkStatus();
+    }
+    if ((token.size() == 5 && (token[0] == 'l' || token[0] == 'L')) &&
+        absl::EqualsIgnoreCase(token, "loop_")) {
+      // A new loop started, check the previous loop and get rid of its data.
+      absl::Status loop_status =
+          CheckLoopColumnSizes(num_loop_keys, loop_token_count);
+      if (!loop_status.ok()) {
+        return loop_status;
+      }
       loop_flag = true;
       loop_column_values.clear();
-      loop_token_index = 0;
+      token_column_index = 0;
+      loop_token_count = 0;
       num_loop_keys = 0;
-      continue;
+      return absl::OkStatus();
     } else if (loop_flag) {
       // The second condition checks we are in the first column. Some mmCIF
       // files (e.g. 4q9r) have values in later columns starting with an
       // underscore and we don't want to read these as keys.
-      int token_column_index =
-          num_loop_keys == 0 ? 0 : loop_token_index % num_loop_keys;
       if (token_column_index == 0 && !token.empty() && token[0] == '_') {
-        if (loop_token_index > 0) {
+        if (loop_token_count > 0) {
           // We are out of the loop.
           loop_flag = false;
         } else {
           // We are in the keys (column names) section of the loop.
-          auto& columns = cif[token];
+          auto [it, inserted] = cif.try_emplace(token);
+          if (!inserted) {
+            return absl::InvalidArgumentError(
+                absl::StrCat("Duplicate loop key: '", token, "'"));
+          }
+          auto& columns = it->second;
           columns.clear();
 
           // Heuristic: _atom_site is typically the largest table in an mmCIF
           // with ~16 columns. Make sure we reserve enough space for its values.
           if (absl::StartsWith(token, "_atom_site.")) {
-            columns.reserve(tokens->size() / 20);
+            columns.reserve(std::min<size_t>(cif_string.size() / 80,
+                                             kMaxInitialAtomSiteReserve));
           }
 
           // Save the pointer to the loop column values.
           loop_column_values.push_back(&columns);
           num_loop_keys += 1;
-          continue;
+          return absl::OkStatus();
         }
       } else {
         // We are in the values section of the loop. We have a pointer to the
@@ -383,16 +469,42 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
                            " expected at most: ", loop_column_values.size()));
         }
         loop_column_values[token_column_index]->emplace_back(token);
-        loop_token_index++;
-        continue;
+        loop_token_count++;
+        if (++token_column_index == num_loop_keys) {
+          // We have completed a row, reset the column index for the next row.
+          token_column_index = 0;
+        }
+        return absl::OkStatus();
       }
     }
     if (key.empty()) {
-      key = token;
+      if (!absl::StartsWith(token, "_")) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Key '", token, "' does not start with an underscore."));
+      }
+      key.assign(token);
     } else {
-      cif[key].emplace_back(token);
-      key = "";
+      auto [it, inserted] = cif.try_emplace(key);
+      if (!inserted) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Duplicate key: '", key, "'"));
+      }
+      it->second.emplace_back(token);
+      key.clear();
     }
+    return absl::OkStatus();
+  };
+  absl::Status tokenize_status = TokenizeInternal(cif_string, process_token);
+  if (!tokenize_status.ok()) {
+    return tokenize_status;
+  }
+  if (is_first_token) {
+    return absl::InvalidArgumentError("The CIF file must not be empty.");
+  }
+  absl::Status loop_status =
+      CheckLoopColumnSizes(num_loop_keys, loop_token_count);
+  if (!loop_status.ok()) {
+    return loop_status;
   }
   return CifDict(std::move(cif));
 }
@@ -601,20 +713,29 @@ CifDict::ExtractLoopAsDict(absl::string_view prefix,
 
 absl::StatusOr<std::vector<std::string>> Tokenize(
     absl::string_view cif_string) {
-  HeapStrings heap_strings;
-  auto tokens = TokenizeInternal(cif_string, &heap_strings);
-  if (!tokens.ok()) {
-    return tokens.status();
+  std::vector<std::string> tokens;
+
+  absl::Status tokenize_status =
+      TokenizeInternal(cif_string, [&](absl::string_view token) {
+        tokens.emplace_back(token);
+        return absl::OkStatus();
+      });
+  if (!tokenize_status.ok()) {
+    return tokenize_status;
   }
-  return std::vector<std::string>(tokens->begin(), tokens->end());
+  return tokens;
 }
 
 absl::StatusOr<std::vector<absl::string_view>> SplitLine(
     absl::string_view line) {
   std::vector<absl::string_view> tokens;
-  if (!SplitLineInline(line, &tokens)) {
-    return absl::InvalidArgumentError(
-        absl::StrCat("Line ended with quote open: ", line));
+  absl::Status split_status =
+      SplitLineInline(line, [&](absl::string_view token) {
+        tokens.push_back(token);
+        return absl::OkStatus();
+      });
+  if (!split_status.ok()) {
+    return split_status;
   }
   return tokens;
 }

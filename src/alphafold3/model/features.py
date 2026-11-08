@@ -1,15 +1,27 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """Data-side of the input features processing."""
 
+from collections.abc import Mapping, Sequence
 import dataclasses
 import datetime
 import itertools
@@ -32,7 +44,7 @@ from alphafold3.model import merging_features
 from alphafold3.model import msa_pairing
 from alphafold3.model.atom_layout import atom_layout
 from alphafold3.structure import chemical_components as struc_chem_comps
-import chex
+import jax
 import jax.numpy as jnp
 import numpy as np
 from rdkit import Chem
@@ -100,12 +112,19 @@ def _unwrap(obj):
     return obj
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Chains:
   chain_id: np.ndarray
   asym_id: np.ndarray
   entity_id: np.ndarray
   sym_id: np.ndarray
+
+
+jax.tree_util.register_dataclass(
+    Chains,
+    data_fields=[f.name for f in dataclasses.fields(Chains)],
+    meta_fields=[],
+)
 
 
 def _compute_asym_entity_and_sym_id(
@@ -131,7 +150,7 @@ def _compute_asym_entity_and_sym_id(
     if chain_id not in seen_chain_ids:
       asym_id = len(seen_chain_ids) + 1
       seen_chain_ids.add(chain_id)
-      seq = ','.join(all_tokens.res_name[all_tokens.chain_id == chain_id])
+      seq = ','.join(all_tokens.res_name[all_tokens.chain_id == chain_id])  # pyrefly: ignore[unsupported-operation]
       if seq not in seq_to_entity_id_sym_id:
         entity_id = len(seq_to_entity_id_sym_id) + 1
         sym_id = 1
@@ -195,10 +214,10 @@ def tokenizer(
   # residue.
   for key, group_iter in itertools.groupby(
       zip(
-          flat_output_layout.chain_type,
+          flat_output_layout.chain_type,  # pyrefly: ignore[bad-argument-type]
           flat_output_layout.chain_id,
           flat_output_layout.res_id,
-          flat_output_layout.res_name,
+          flat_output_layout.res_name,  # pyrefly: ignore[bad-argument-type]
           flat_output_layout.atom_name,
           np.arange(flat_output_layout.shape[0]),
       ),
@@ -305,7 +324,7 @@ def tokenizer(
       # Standard protein and nucleic residues have many atoms per token
       chain_id = all_tokens.chain_id[idx]
       res_id = all_tokens.res_id[idx]
-      res_name = all_tokens.res_name[idx]
+      res_name = all_tokens.res_name[idx]  # pyrefly: ignore[unsupported-operation]
       atom_names = []
       atom_elements = []
 
@@ -363,16 +382,16 @@ def tokenizer(
       # ligands have only 1 atom per token
       padding = [''] * (max_atoms_per_token - 1)
       atom_names = [all_tokens.atom_name[idx]] + padding
-      atom_elements = [all_tokens.atom_element[idx]] + padding
+      atom_elements = [all_tokens.atom_element[idx]] + padding  # pyrefly: ignore[unsupported-operation]
 
     # Append the atoms to the target lists.
     target_atom_names.append(atom_names)
     target_atom_elements.append(atom_elements)
-    target_res_names.append([all_tokens.res_name[idx]] * max_atoms_per_token)
+    target_res_names.append([all_tokens.res_name[idx]] * max_atoms_per_token)  # pyrefly: ignore[unsupported-operation]
     target_res_ids.append([all_tokens.res_id[idx]] * max_atoms_per_token)
     target_chain_ids.append([all_tokens.chain_id[idx]] * max_atoms_per_token)
     target_chain_types.append(
-        [all_tokens.chain_type[idx]] * max_atoms_per_token
+        [all_tokens.chain_type[idx]] * max_atoms_per_token  # pyrefly: ignore[unsupported-operation]
     )
 
   # Make sure to get the right shape also for 0 tokens
@@ -391,7 +410,7 @@ def tokenizer(
   return all_tokens, all_token_atoms_layout, standard_token_idxs
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MSA:
   """Dataclass containing MSA."""
 
@@ -412,9 +431,11 @@ class MSA:
       all_tokens: atom_layout.AtomLayout,
       standard_token_idxs: np.ndarray,
       padding_shapes: PaddingShapes,
-      fold_input: folding_input.Input,
+      unpaired_msa_by_chain_id: Mapping[str, str],
+      paired_msa_by_chain_id: Mapping[str, str],
       logging_name: str,
       max_paired_sequence_per_species: int,
+      resolve_msa_overlaps: bool = True,
   ) -> Self:
     """Compute the msa features."""
     seen_entities = {}
@@ -429,12 +450,10 @@ class MSA:
     need_msa_pairing = num_unique_chains > 1
 
     np_chains_list = []
-    input_chains_by_id = {chain.id: chain for chain in fold_input.chains}
     nonempty_chain_ids = set(all_tokens.chain_id)
     for asym_id, chain_info in enumerate(substruct.iter_chains(), start=1):
       b_chain_id = chain_info['chain_id']
       chain_type = chain_info['chain_type']
-      chain = input_chains_by_id[b_chain_id]
 
       # Generalised "sequence" for ligands (can't trust residue name)
       chain_tokens = all_tokens[all_tokens.chain_id == b_chain_id]
@@ -472,19 +491,26 @@ class MSA:
 
       if chain_type in mmcif_names.STANDARD_POLYMER_CHAIN_TYPES:
         unpaired_a3m = ''
+        if not skip_chain and chain_type in (
+            mmcif_names.RNA_CHAIN,
+            mmcif_names.PROTEIN_CHAIN,
+        ):
+          unpaired_a3m = unpaired_msa_by_chain_id[b_chain_id]
+
         paired_a3m = ''
-        if not skip_chain:
-          if need_msa_pairing and isinstance(chain, folding_input.ProteinChain):
-            paired_a3m = chain.paired_msa
-          if isinstance(
-              chain, folding_input.RnaChain | folding_input.ProteinChain
-          ):
-            unpaired_a3m = chain.unpaired_msa
+        if (
+            not skip_chain
+            and need_msa_pairing
+            and chain_type == mmcif_names.PROTEIN_CHAIN
+        ):
+          paired_a3m = paired_msa_by_chain_id[b_chain_id]
+        # If we generated the MSA ourselves, it is already deduplicated. If it
+        # is user-provided, keep it as is to prevent destroying desired pairing.
         unpaired_msa = msa_module.Msa.from_a3m(
             query_sequence=sequence,
             chain_poly_type=chain_type,
             a3m=unpaired_a3m,
-            deduplicate=True,
+            deduplicate=False,
         )
 
         paired_msa = msa_module.Msa.from_a3m(
@@ -506,10 +532,7 @@ class MSA:
       msa_features = unpaired_msa.featurize()
       all_seqs_msa_features = paired_msa.featurize()
 
-      msa_features = data3.fix_features(msa_features)
-      all_seqs_msa_features = data3.fix_features(all_seqs_msa_features)
-
-      msa_features = msa_features | {
+      msa_features = msa_features | {  # pyrefly: ignore[unsupported-operation]
           f'{k}_all_seq': v for k, v in all_seqs_msa_features.items()
       }
       feats = msa_features
@@ -534,9 +557,10 @@ class MSA:
           nonempty_chain_ids=nonempty_chain_ids,
           max_hits_per_species=max_paired_sequence_per_species,
       )
-      np_chains_list = msa_pairing.deduplicate_unpaired_sequences(
-          np_chains_list
-      )
+      if resolve_msa_overlaps:
+        np_chains_list = msa_pairing.deduplicate_unpaired_sequences(
+            np_chains_list
+        )
 
     # Remove all gapped rows from all seqs.
     nonempty_asym_ids = []
@@ -545,7 +569,7 @@ class MSA:
         nonempty_asym_ids.append(chain['asym_id'][0])
     if 'msa_all_seq' in np_chains_list[0]:
       np_chains_list = msa_pairing.remove_all_gapped_rows_from_all_seqs(
-          np_chains_list, asym_ids=nonempty_asym_ids
+          np_chains_list, asym_ids=nonempty_asym_ids  # pyrefly: ignore[bad-argument-type]
       )
 
     # Crop MSA rows.
@@ -609,7 +633,7 @@ class MSA:
       ])
       np_example['msa_all_seq'] = np_example['msa_all_seq'][:max_allowed_paired]
 
-    np_example = merging_features.merge_paired_and_unpaired_msa(np_example)
+    np_example = merging_features.merge_paired_and_unpaired_msa(np_example)  # pyrefly: ignore[bad-argument-type]
 
     # Crop MSA residues. Need to use the standard token indices, since msa does
     # not expand non-standard residues. This means that for expanded residues,
@@ -635,7 +659,7 @@ class MSA:
           np.int8
       )
 
-    return MSA(
+    return MSA(  # pyrefly: ignore[bad-return]
         rows=_pad_to(safe_cast_int8(np_example['msa']), (msa_size, num_tokens)),
         mask=_pad_to(
             np_example['msa_mask'].astype(bool), (msa_size, num_tokens)
@@ -646,15 +670,15 @@ class MSA:
             safe_cast_int8(np_example['deletion_matrix']),
             (msa_size, num_tokens),
         ),
-        profile=_pad_to(np_example['profile'], (num_tokens, None)),
-        deletion_mean=_pad_to(np_example['deletion_mean'], (num_tokens,)),
+        profile=_pad_to(np_example['profile'], (num_tokens, None)),  # pyrefly: ignore[bad-argument-type]
+        deletion_mean=_pad_to(np_example['deletion_mean'], (num_tokens,)),  # pyrefly: ignore[bad-argument-type]
         num_alignments=np.array(num_alignments, dtype=np.int32),
     )
 
   def index_msa_rows(self, indices: xnp_ndarray) -> Self:
     assert indices.ndim == 1
 
-    return MSA(
+    return MSA(  # pyrefly: ignore[bad-return]
         rows=self.rows[indices, :],
         mask=self.mask[indices, :],
         deletion_matrix=self.deletion_matrix[indices, :],
@@ -686,7 +710,14 @@ class MSA:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    MSA,
+    data_fields=[f.name for f in dataclasses.fields(MSA)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class Templates:
   """Dataclass containing templates."""
 
@@ -703,7 +734,7 @@ class Templates:
       all_tokens: atom_layout.AtomLayout,
       standard_token_idxs: np.ndarray,
       padding_shapes: PaddingShapes,
-      fold_input: folding_input.Input,
+      templates_by_chain_id: Mapping[str, Sequence[folding_input.Template]],
       max_templates: int,
       logging_name: str,
   ) -> Self:
@@ -719,13 +750,12 @@ class Templates:
     )
     np_chains_list = []
 
-    input_chains_by_id = {chain.id: chain for chain in fold_input.chains}
+    sequences = substruct.chain_single_letter_sequence()
 
     nonempty_chain_ids = set(all_tokens.chain_id)
     for chain_info in substruct.iter_chains():
       chain_id = chain_info['chain_id']
       chain_type = chain_info['chain_type']
-      chain = input_chains_by_id[chain_id]
 
       # Generalised "sequence" for ligands (can't trust residue name)
       chain_tokens = all_tokens[all_tokens.chain_id == chain_id]
@@ -749,10 +779,9 @@ class Templates:
         if skip_chain:
           template_features = data3.empty_template_features(chain_num_tokens)
         else:
-          assert isinstance(chain, folding_input.ProteinChain)
 
           sorted_features = []
-          for template in chain.templates:
+          for template in templates_by_chain_id[chain_id]:
             struc = structure.from_mmcif(
                 template.mmcif,
                 fix_mse_residues=True,
@@ -764,7 +793,7 @@ class Templates:
             hit_features = templates.get_polymer_features(
                 chain=struc,
                 chain_poly_type=mmcif_names.PROTEIN_CHAIN,
-                query_sequence_length=len(chain.sequence),
+                query_sequence_length=len(sequences[chain_id]),
                 query_to_hit_mapping=dict(template.query_to_template_map),
             )
             sorted_features.append(hit_features)
@@ -775,7 +804,8 @@ class Templates:
           )
 
           template_features = data3.fix_template_features(
-              template_features=template_features, num_res=len(chain.sequence)
+              template_features=template_features,
+              num_res=len(sequences[chain_id]),
           )
 
         template_features = _reduce_template_features(
@@ -829,7 +859,7 @@ class Templates:
             (None, padding_shapes.num_tokens, None),
         ),
     )
-    return templates_features
+    return templates_features  # pyrefly: ignore[bad-return]
 
   @classmethod
   def from_data_dict(cls, batch: BatchDict) -> Self:
@@ -846,6 +876,13 @@ class Templates:
         'template_atom_positions': self.atom_positions,
         'template_atom_mask': self.atom_mask,
     }
+
+
+jax.tree_util.register_dataclass(
+    Templates,
+    data_fields=[f.name for f in dataclasses.fields(Templates)],
+    meta_fields=[],
+)
 
 
 def _reduce_template_features(
@@ -866,7 +903,7 @@ def _reduce_template_features(
   return template_features
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TokenFeatures:
   """Dataclass containing features for tokens."""
 
@@ -892,12 +929,14 @@ class TokenFeatures:
   is_ligand: xnp_ndarray
   is_nonstandard_polymer_chain: xnp_ndarray
   is_water: xnp_ndarray
+  is_crosslinker: xnp_ndarray
 
   @classmethod
   def compute_features(
       cls,
       all_tokens: atom_layout.AtomLayout,
       padding_shapes: PaddingShapes,
+      xl_chain_ids: frozenset[str] = frozenset(),
   ) -> Self:
     """Compute the per-token features."""
 
@@ -906,7 +945,7 @@ class TokenFeatures:
     token_index = np.arange(1, len(all_tokens.atom_name) + 1).astype(np.int32)
 
     aatype = []
-    for res_name, chain_type in zip(all_tokens.res_name, all_tokens.chain_type):
+    for res_name, chain_type in zip(all_tokens.res_name, all_tokens.chain_type):  # pyrefly: ignore[bad-argument-type]
       if chain_type in mmcif_names.POLYMER_CHAIN_TYPES:
         res_name = mmcif_names.fix_non_standard_polymer_res(
             res_name=res_name, chain_type=chain_type
@@ -941,17 +980,18 @@ class TokenFeatures:
     is_rna = all_tokens.chain_type == mmcif_names.RNA_CHAIN
     is_dna = all_tokens.chain_type == mmcif_names.DNA_CHAIN
     is_ligand = np.isin(
-        all_tokens.chain_type, list(mmcif_names.LIGAND_CHAIN_TYPES)
+        all_tokens.chain_type, list(mmcif_names.LIGAND_CHAIN_TYPES)  # pyrefly: ignore[bad-argument-type]
     )
     standard_polymer_chain = list(mmcif_names.NON_POLYMER_CHAIN_TYPES) + list(
         mmcif_names.STANDARD_POLYMER_CHAIN_TYPES
     )
     is_nonstandard_polymer_chain = np.isin(
-        all_tokens.chain_type, standard_polymer_chain, invert=True
+        all_tokens.chain_type, standard_polymer_chain, invert=True  # pyrefly: ignore[bad-argument-type]
     )
     is_water = all_tokens.chain_type == mmcif_names.WATER
+    is_crosslinker = np.isin(all_tokens.chain_id, list(xl_chain_ids))
 
-    return TokenFeatures(
+    return TokenFeatures(  # pyrefly: ignore[bad-return]
         residue_index=_pad_to(residue_index, (padding_shapes.num_tokens,)),
         token_index=_pad_to(token_index, (padding_shapes.num_tokens,)),
         aatype=_pad_to(aatype, (padding_shapes.num_tokens,)),
@@ -960,18 +1000,23 @@ class TokenFeatures:
         entity_id=_pad_to(entity_id, (padding_shapes.num_tokens,)),
         sym_id=_pad_to(sym_id, (padding_shapes.num_tokens,)),
         seq_length=seq_length,
-        is_protein=_pad_to(is_protein, (padding_shapes.num_tokens,)),
-        is_rna=_pad_to(is_rna, (padding_shapes.num_tokens,)),
-        is_dna=_pad_to(is_dna, (padding_shapes.num_tokens,)),
+        is_protein=_pad_to(is_protein, (padding_shapes.num_tokens,)),  # pyrefly: ignore[bad-argument-type]
+        is_rna=_pad_to(is_rna, (padding_shapes.num_tokens,)),  # pyrefly: ignore[bad-argument-type]
+        is_dna=_pad_to(is_dna, (padding_shapes.num_tokens,)),  # pyrefly: ignore[bad-argument-type]
         is_ligand=_pad_to(is_ligand, (padding_shapes.num_tokens,)),
         is_nonstandard_polymer_chain=_pad_to(
             is_nonstandard_polymer_chain, (padding_shapes.num_tokens,)
         ),
-        is_water=_pad_to(is_water, (padding_shapes.num_tokens,)),
+        is_water=_pad_to(is_water, (padding_shapes.num_tokens,)),  # pyrefly: ignore[bad-argument-type]
+        is_crosslinker=_pad_to(is_crosslinker, (padding_shapes.num_tokens,)),
     )
 
   @classmethod
   def from_data_dict(cls, batch: BatchDict) -> Self:
+    is_crosslinker = batch.get(
+        'is_crosslinker',
+        jnp.zeros_like(batch['seq_mask'], dtype=bool),
+    )
     return cls(
         residue_index=batch['residue_index'],
         token_index=batch['token_index'],
@@ -987,6 +1032,7 @@ class TokenFeatures:
         is_ligand=batch['is_ligand'],
         is_nonstandard_polymer_chain=batch['is_nonstandard_polymer_chain'],
         is_water=batch['is_water'],
+        is_crosslinker=is_crosslinker,
     )
 
   def as_data_dict(self) -> BatchDict:
@@ -1005,10 +1051,18 @@ class TokenFeatures:
         'is_ligand': self.is_ligand,
         'is_nonstandard_polymer_chain': self.is_nonstandard_polymer_chain,
         'is_water': self.is_water,
+        'is_crosslinker': self.is_crosslinker,
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    TokenFeatures,
+    data_fields=[f.name for f in dataclasses.fields(TokenFeatures)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class PredictedStructureInfo:
   """Contains information necessary to work with predicted structure."""
 
@@ -1070,7 +1124,14 @@ class PredictedStructureInfo:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    PredictedStructureInfo,
+    data_fields=[f.name for f in dataclasses.fields(PredictedStructureInfo)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class PolymerLigandBondInfo:
   """Contains information about polymer-ligand bonds."""
 
@@ -1109,8 +1170,8 @@ class PolymerLigandBondInfo:
       # These atom renames are so that we can use the atom layout code with
       # all_tokens, which only has a single atom per token.
       atom_names = bond_layout.atom_name.copy()
-      atom_names[np.isin(bond_layout.chain_type, peptide_types)] = 'CA'
-      atom_names[np.isin(bond_layout.chain_type, nucleic_types)] = "C1'"
+      atom_names[np.isin(bond_layout.chain_type, peptide_types)] = 'CA'  # pyrefly: ignore[bad-argument-type]
+      atom_names[np.isin(bond_layout.chain_type, nucleic_types)] = "C1'"  # pyrefly: ignore[bad-argument-type]
       adjusted_bond_layout = atom_layout.AtomLayout(
           atom_name=atom_names,
           res_id=bond_layout.res_id,
@@ -1186,7 +1247,14 @@ class PolymerLigandBondInfo:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    PolymerLigandBondInfo,
+    data_fields=[f.name for f in dataclasses.fields(PolymerLigandBondInfo)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class LigandLigandBondInfo:
   """Contains information about the location of ligand-ligand bonds."""
 
@@ -1282,7 +1350,14 @@ class LigandLigandBondInfo:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    LigandLigandBondInfo,
+    data_fields=[f.name for f in dataclasses.fields(LigandLigandBondInfo)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class PseudoBetaInfo:
   """Contains information for extracting pseudo-beta and equivalent atoms."""
 
@@ -1311,7 +1386,7 @@ class PseudoBetaInfo:
     token_idxs = []
     atom_idxs = []
     for token_idx in range(all_token_atoms_layout.shape[0]):
-      chain_type = all_token_atoms_layout.chain_type[token_idx, 0]
+      chain_type = all_token_atoms_layout.chain_type[token_idx, 0]  # pyrefly: ignore[unsupported-operation]
       atom_names = list(all_token_atoms_layout.atom_name[token_idx, :])
       atom_idx = None
       is_nucleic_backbone = (
@@ -1326,7 +1401,7 @@ class PseudoBetaInfo:
           atom_idx = atom_names.index('CA')
       elif is_nucleic_backbone:
         # RNA / DNA chains
-        res_name = all_token_atoms_layout.res_name[token_idx, 0]
+        res_name = all_token_atoms_layout.res_name[token_idx, 0]  # pyrefly: ignore[unsupported-operation]
         cifdict = ccd.get(res_name)
         if cifdict:
           parent = cifdict['_chem_comp.mon_nstd_parent_comp_id'][0]
@@ -1395,6 +1470,13 @@ class PseudoBetaInfo:
             key_prefix='token_atoms_to_pseudo_beta'
         ),
     }
+
+
+jax.tree_util.register_dataclass(
+    PseudoBetaInfo,
+    data_fields=[f.name for f in dataclasses.fields(PseudoBetaInfo)],
+    meta_fields=[],
+)
 
 
 _DEFAULT_BLANK_REF = {
@@ -1576,7 +1658,7 @@ def get_reference(
     )
 
   # Augment reference positions.
-  pos = random_augmentation(pos, random_state)
+  pos = random_augmentation(pos, random_state)  # pyrefly: ignore[bad-argument-type]
 
   # Extract atom and bond information from CCD cif.
   from_atom = ccd_cif.get('_chem_comp_bond.atom_id_1', None)
@@ -1597,7 +1679,7 @@ def get_reference(
   return features, from_atom, dest_atom
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RefStructure:
   """Contains ref structure information."""
 
@@ -1649,7 +1731,7 @@ class RefStructure:
     for idx in np.ndindex(all_token_atoms_layout.shape):
       chain_id = all_token_atoms_layout.chain_id[idx]
       res_id = all_token_atoms_layout.res_id[idx]
-      res_name = all_token_atoms_layout.res_name[idx]
+      res_name = all_token_atoms_layout.res_name[idx]  # pyrefly: ignore[unsupported-operation]
       is_non_standard = res_name not in _STANDARD_RESIDUES
       atom_name = all_token_atoms_layout.atom_name[idx]
       if not atom_name:
@@ -1690,7 +1772,7 @@ class RefStructure:
           logging.warning(
               'Missing atom "%s" for CCD "%s"',
               atom_name,
-              all_token_atoms_layout.res_name[idx],
+              all_token_atoms_layout.res_name[idx],  # pyrefly: ignore[unsupported-operation]
           )
         ref = conformation.get(atom_name, _DEFAULT_BLANK_REF)
       for k in ref:
@@ -1755,11 +1837,28 @@ class RefStructure:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
-class ConvertModelOutput:
-  """Contains atom layout info."""
+jax.tree_util.register_dataclass(
+    RefStructure,
+    data_fields=[f.name for f in dataclasses.fields(RefStructure)],
+    meta_fields=[],
+)
 
-  cleaned_struc: structure.Structure
+
+@dataclasses.dataclass(frozen=True)
+class ConvertModelOutput:
+  """Contains information needed to convert model flat output back to structure.
+
+  Attributes:
+    token_atoms_layout: Layout mapping tokens to their corresponding atoms.
+    flat_output_layout: Flat layout of all atoms present in the structure.
+    empty_output_struc: Container structure without coordinates used to store
+      the converted model predictions.
+    polymer_ligand_bonds: Atom layout containing information on the bonds
+      between polymers and ligands.
+    ligand_ligand_bonds: Atom layout containing information on the intra- and
+      inter-ligand covalent bonds.
+  """
+
   token_atoms_layout: atom_layout.AtomLayout
   flat_output_layout: atom_layout.AtomLayout
   empty_output_struc: structure.Structure
@@ -1771,7 +1870,6 @@ class ConvertModelOutput:
       cls,
       all_token_atoms_layout: atom_layout.AtomLayout,
       padding_shapes: PaddingShapes,
-      cleaned_struc: structure.Structure,
       flat_output_layout: atom_layout.AtomLayout,
       empty_output_struc: structure.Structure,
       polymer_ligand_bonds: atom_layout.AtomLayout,
@@ -1784,7 +1882,6 @@ class ConvertModelOutput:
     )
 
     return cls(
-        cleaned_struc=cleaned_struc,
         token_atoms_layout=token_atoms_layout,
         flat_output_layout=flat_output_layout,
         empty_output_struc=empty_output_struc,
@@ -1797,7 +1894,6 @@ class ConvertModelOutput:
     """Construct atom layout object from dictionary."""
 
     return cls(
-        cleaned_struc=_unwrap(batch.get('cleaned_struc', None)),
         token_atoms_layout=_unwrap(batch.get('token_atoms_layout', None)),
         flat_output_layout=_unwrap(batch.get('flat_output_layout', None)),
         empty_output_struc=_unwrap(batch.get('empty_output_struc', None)),
@@ -1807,7 +1903,6 @@ class ConvertModelOutput:
 
   def as_data_dict(self) -> BatchDict:
     return {
-        'cleaned_struc': np.array(self.cleaned_struc, object),
         'token_atoms_layout': np.array(self.token_atoms_layout, object),
         'flat_output_layout': np.array(self.flat_output_layout, object),
         'empty_output_struc': np.array(self.empty_output_struc, object),
@@ -1816,7 +1911,14 @@ class ConvertModelOutput:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    ConvertModelOutput,
+    data_fields=[f.name for f in dataclasses.fields(ConvertModelOutput)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class AtomCrossAtt:
   """Operate on flat atoms."""
 
@@ -1960,7 +2062,14 @@ class AtomCrossAtt:
     }
 
 
-@chex.dataclass(mappable_dataclass=False, frozen=True)
+jax.tree_util.register_dataclass(
+    AtomCrossAtt,
+    data_fields=[f.name for f in dataclasses.fields(AtomCrossAtt)],
+    meta_fields=[],
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class Frames:
   """Features for backbone frames."""
 
@@ -1999,7 +2108,7 @@ class Frames:
 
     # Iterate over tokens
     for idx, args in enumerate(
-        zip(all_tokens.chain_type, all_tokens.chain_id, all_tokens.res_id)
+        zip(all_tokens.chain_type, all_tokens.chain_id, all_tokens.res_id)  # pyrefly: ignore[bad-argument-type]
     ):
 
       chain_type, chain_id, res_id = args
@@ -2077,3 +2186,10 @@ class Frames:
 
   def as_data_dict(self) -> BatchDict:
     return {'frames_mask': self.mask}
+
+
+jax.tree_util.register_dataclass(
+    Frames,
+    data_fields=[f.name for f in dataclasses.fields(Frames)],
+    meta_fields=[],
+)

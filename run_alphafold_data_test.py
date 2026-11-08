@@ -1,12 +1,23 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """Tests the AlphaFold 3 data pipeline."""
 
@@ -24,14 +35,15 @@ from typing import Any
 from absl.testing import absltest
 from absl.testing import parameterized
 from alphafold3 import structure
+from alphafold3.common import af3x_version
 from alphafold3.common import folding_input
 from alphafold3.common import resources
 from alphafold3.common.testing import data as testing_data
 from alphafold3.constants import chemical_components
 from alphafold3.data import featurisation
 from alphafold3.data import pipeline
+from alphafold3.model import features
 from alphafold3.model.atom_layout import atom_layout
-from alphafold3.structure import test_utils
 import jax
 import numpy as np
 
@@ -98,7 +110,7 @@ def _generate_diff(actual: str, expected: str) -> str:
   )
 
 
-class DataPipelineTest(test_utils.StructureTestCase):
+class DataPipelineTest(parameterized.TestCase):
   """Test AlphaFold 3 inference."""
 
   def setUp(self):
@@ -163,7 +175,9 @@ class DataPipelineTest(test_utils.StructureTestCase):
             {
                 'protein': {
                     'id': 'P',
-                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'sequence': (
+                        'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
+                    ),
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -182,13 +196,20 @@ class DataPipelineTest(test_utils.StructureTestCase):
         resources.ROOT / f'test_data/{filename}'
     ).path()
     with open(golden_path, 'r') as golden_file:
-      golden_text = golden_file.read()
+      golden_text = golden_file.read().rstrip('\n')
     with open(result_path, 'r') as result_file:
-      result_text = result_file.read()
+      result_text = result_file.read().rstrip('\n')
 
     diff = _generate_diff(result_text, golden_text)
 
     self.assertEqual(diff, "", f"Result differs from golden:\n{diff}")
+
+  def test_all_examples_are_valid(self):
+    examples_dir = testing_data.Data(resources.ROOT / '../../examples').path()
+    for filename in sorted(os.listdir(examples_dir)):
+      with open(os.path.join(examples_dir, filename), 'rt') as f:
+        with self.subTest(filename):
+          folding_input.Input.from_json(f.read())
 
   def test_config(self):
     model_config = run_alphafold.make_model_config()
@@ -206,13 +227,17 @@ class DataPipelineTest(test_utils.StructureTestCase):
     full_fold_input = data_pipeline.process(fold_input)
     featurised_example = featurisation.featurise_input(
         full_fold_input,
-        ccd=chemical_components.cached_ccd(),
+        ccd=chemical_components.Ccd(),
         buckets=None,
     )
-    del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.
 
     with _output('featurised_example.pkl') as (_, output):
       output.write(pickle.dumps(featurised_example))
+
+    del featurised_example[0]['frames_mask']  # Depends on RDKit/CCD version.
+    del featurised_example[0]['ref_charge']  # Depends on RDKit/CCD version.
+    del featurised_example[0]['ref_pos']  # Depends on RDKit/CCD version.
+
     featurised_example = jax.tree_util.tree_map(_hash_data, featurised_example)
     with _output('featurised_example.json') as (result_path, output):
       output.write(
@@ -372,6 +397,42 @@ class CrosslinkDataPipelineTest(DataPipelineTest):
     ) as f:
       out_json = json.load(f)
 
+  def test_expand_links_tracks_crosslinker_chain_ids(self):
+    fold_input = folding_input.Input.from_json(self._test_input_json)
+    fold_input = fold_input.expand_links()
+
+    ligand_ids = frozenset(ligand.id for ligand in fold_input.ligands)
+    self.assertEqual(fold_input.crosslinker_chain_ids, ligand_ids)
+    self.assertTrue(all(ligand.is_crosslinker for ligand in fold_input.ligands))
+
+
+class TokenFeaturesCompatibilityTest(absltest.TestCase):
+
+  def test_from_data_dict_defaults_is_crosslinker_to_false(self):
+    batch = {
+        'residue_index': np.array([1, 2], dtype=np.int32),
+        'token_index': np.array([1, 2], dtype=np.int32),
+        'aatype': np.array([0, 0], dtype=np.int32),
+        'seq_mask': np.array([True, True], dtype=bool),
+        'entity_id': np.array([1, 1], dtype=np.int32),
+        'asym_id': np.array([1, 1], dtype=np.int32),
+        'sym_id': np.array([1, 1], dtype=np.int32),
+        'seq_length': np.array(2, dtype=np.int32),
+        'is_protein': np.array([True, True], dtype=bool),
+        'is_rna': np.array([False, False], dtype=bool),
+        'is_dna': np.array([False, False], dtype=bool),
+        'is_ligand': np.array([False, False], dtype=bool),
+        'is_nonstandard_polymer_chain': np.array([False, False], dtype=bool),
+        'is_water': np.array([False, False], dtype=bool),
+    }
+
+    token_features = features.TokenFeatures.from_data_dict(batch)
+
+    np.testing.assert_array_equal(
+        np.asarray(token_features.is_crosslinker),
+        np.array([False, False], dtype=bool),
+    )
+
 class CrosslinkDataPipelineTest4G3Y(CrosslinkDataPipelineTest):
   """Test AlphaFold 3 inference."""
 
@@ -466,6 +527,278 @@ class DisulfideDataPipelineTest8WW0(DataPipelineTest):
     self.assertIsNone(fold_input.bonded_atom_pairs)
     self.assertEqual(len(fold_input.ligands), 0)
     # self.assertIsNotNone(fold_input.disulfide_bonds)
+
+class CrosslinkErrorHandlingTest(absltest.TestCase):
+  """Tests that expand_links raises clearly on invalid crosslink inputs."""
+
+  # Sequence with LYS residues (required by NHS-ester crosslinkers like DSSO).
+  # Position 5 = K (LYS), position 81 = K (LYS).
+  _LYS_SEQUENCE = (
+      'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADT'
+      'EAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
+  )
+  # All-Ala sequence (10 aa): contains no LYS, SER, or THR.
+  _ALA_SEQUENCE = 'AAAAAAAAAA'
+
+  def _make_json(self, seq_a, seq_b, crosslinks):
+    return json.dumps({
+        'name': 'test',
+        'modelSeeds': [1],
+        'sequences': [
+            {'protein': {'id': 'A', 'sequence': seq_a, 'modifications': [],
+                         'unpairedMsa': None, 'pairedMsa': None}},
+            {'protein': {'id': 'B', 'sequence': seq_b, 'modifications': [],
+                         'unpairedMsa': None, 'pairedMsa': None}},
+        ],
+        'crosslinks': crosslinks,
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    })
+
+  def test_invalid_crosslinker_name_raises(self):
+    """expand_links raises ValueError for an unrecognised crosslinker name."""
+    json_str = self._make_json(
+        self._LYS_SEQUENCE, self._LYS_SEQUENCE,
+        [{'name': 'NONEXISTENT_XL', 'residue_pairs': [(('A', 5), ('B', 5))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises(ValueError):
+      fold_input.expand_links()
+
+  def test_wrong_residue_type_raises(self):
+    """expand_links raises ValueError when the residue type is incompatible with the crosslinker.
+
+    DSSO targets LYS, SER, THR, TYR, or the N-terminus (NTER at position 1).
+    An all-Ala sequence at position 2 (not the N-terminus) has no valid attachment site.
+    """
+    json_str = self._make_json(
+        self._ALA_SEQUENCE, self._ALA_SEQUENCE,
+        [{'name': 'DSSO', 'residue_pairs': [(('A', 2), ('B', 2))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises(ValueError):
+      fold_input.expand_links()
+
+  def test_residue_out_of_range_raises(self):
+    """expand_links raises when a residue index exceeds the chain length."""
+    # _ALA_SEQUENCE is 10 residues; resid 11 is out of range.
+    json_str = self._make_json(
+        self._ALA_SEQUENCE, self._ALA_SEQUENCE,
+        [{'name': 'DSSO', 'residue_pairs': [(('A', 11), ('B', 1))]}],
+    )
+    fold_input = folding_input.Input.from_json(json_str)
+    with self.assertRaises((ValueError, IndexError)):
+      fold_input.expand_links()
+
+  def test_no_crosslinks_expand_links_is_noop(self):
+    """expand_links with no crosslinks returns the input unchanged (no new ligands or bonds)."""
+    json_str = self._make_json(self._LYS_SEQUENCE, self._LYS_SEQUENCE, [])
+    fold_input = folding_input.Input.from_json(json_str)
+    expanded = fold_input.expand_links()
+    # Bug was: UnboundLocalError because user_ccd/bonded_atom_pairs were only
+    # set inside the `if all_links:` block but referenced unconditionally in the return.
+    self.assertIsNone(expanded.bonded_atom_pairs)
+    self.assertEqual(len(expanded.ligands), 0)
+    self.assertEqual(len(expanded.protein_chains), 2)
+
+
+# Minimal valid user CCD entry for a two-atom ligand.
+_USER_CCD = """data_MYL
+#
+_chem_comp.formula                 "C H4 O"
+_chem_comp.formula_weight          32.04
+_chem_comp.id                      MYL
+_chem_comp.mon_nstd_parent_comp_id ?
+_chem_comp.name                    "Test ligand"
+_chem_comp.pdbx_synonyms           ?
+_chem_comp.type                    non-polymer
+#
+loop_
+_chem_comp_atom.atom_id
+_chem_comp_atom.charge
+_chem_comp_atom.comp_id
+_chem_comp_atom.pdbx_model_Cartn_x_ideal
+_chem_comp_atom.pdbx_model_Cartn_y_ideal
+_chem_comp_atom.pdbx_model_Cartn_z_ideal
+_chem_comp_atom.type_symbol
+C1 0 MYL 0.000 0.000 0.000 C
+O1 0 MYL 1.400 0.000 0.000 O
+#
+loop_
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.comp_id
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.value_order
+C1 O1 MYL N SING
+#
+"""
+
+
+class CrosslinkWithBondedAtomPairsTest(absltest.TestCase):
+  """expand_links must keep user-supplied bonds when adding XL bonds.
+
+  __post_init__ coerces bonded_atom_pairs to a tuple, so expand_links has to
+  copy it into a list before extending. Inputs carrying a userCCD hit this first
+  because naming atoms in a userCCD is what makes them bondable, but the trigger
+  is bondedAtomPairs, not the userCCD.
+  """
+
+  _SEQUENCE = CrosslinkErrorHandlingTest._LYS_SEQUENCE
+
+  def _make_input(self, *, user_ccd=None, ligand=None, bonds=None,
+                  crosslinks=None, disulfide_bonds=None):
+    sequences = [
+        {'protein': {'id': 'A', 'sequence': self._SEQUENCE, 'modifications': [],
+                     'unpairedMsa': None, 'pairedMsa': None}},
+        {'protein': {'id': 'B', 'sequence': self._SEQUENCE, 'modifications': [],
+                     'unpairedMsa': None, 'pairedMsa': None}},
+    ]
+    if ligand is not None:
+      sequences.append({'ligand': ligand})
+    raw = {
+        'name': 'test',
+        'modelSeeds': [1],
+        'sequences': sequences,
+        'dialect': folding_input.JSON_DIALECT,
+        'version': folding_input.JSON_VERSION,
+    }
+    if user_ccd is not None:
+      raw['userCCD'] = user_ccd
+    if bonds is not None:
+      raw['bondedAtomPairs'] = bonds
+    if crosslinks is not None:
+      raw['crosslinks'] = crosslinks
+    if disulfide_bonds is not None:
+      raw['disulfide_bonds'] = disulfide_bonds
+    return folding_input.Input.from_json(json.dumps(raw))
+
+  _DSSO = [{'name': 'DSSO', 'residue_pairs': [(('A', 5), ('B', 5))]}]
+  _USER_BOND = [(('A', 1, 'CB'), ('L', 1, 'C1'))]
+  _LIGAND = {'id': 'L', 'ccdCodes': ['MYL']}
+
+  def test_user_ccd_bond_survives_crosslink_expansion(self):
+    """A userCCD ligand bond and the XL bonds must coexist."""
+    fold_input = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND,
+        bonds=self._USER_BOND, crosslinks=self._DSSO,
+    )
+    self.assertIsInstance(fold_input.bonded_atom_pairs, tuple)
+
+    expanded = fold_input.expand_links()
+
+    # One user bond plus two XL bonds (one per crosslinked residue).
+    self.assertLen(expanded.bonded_atom_pairs, 3)
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'C1')), expanded.bonded_atom_pairs)
+    self.assertEqual(expanded.crosslinker_chain_ids, frozenset({'C'}))
+    # The user CCD entry must survive alongside the appended crosslinker entry.
+    ccd = chemical_components.cached_ccd(user_ccd=expanded.user_ccd)
+    self.assertIn('MYL', ccd)
+    self.assertIn('DSSO', ccd)
+
+  def test_bonded_atom_pairs_without_user_ccd(self):
+    """The trigger is bondedAtomPairs, not the userCCD."""
+    expanded = self._make_input(
+        ligand={'id': 'L', 'ccdCodes': ['ATP']},
+        bonds=[(('A', 1, 'CB'), ('L', 1, 'PA'))],
+        crosslinks=self._DSSO,
+    ).expand_links()
+
+    self.assertLen(expanded.bonded_atom_pairs, 3)
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'PA')), expanded.bonded_atom_pairs)
+
+  def test_bonded_atom_pairs_with_disulfide_bonds(self):
+    """Disulfide expansion goes through the same code path."""
+    expanded = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND, bonds=self._USER_BOND,
+        disulfide_bonds=[{'residue_pairs': [(('A', 6), ('A', 14))]}],
+    ).expand_links()
+
+    self.assertIn((('A', 1, 'CB'), ('L', 1, 'C1')), expanded.bonded_atom_pairs)
+
+  def test_expand_links_does_not_mutate_input(self):
+    """expand_links must not extend the caller's bonded_atom_pairs in place."""
+    fold_input = self._make_input(
+        user_ccd=_USER_CCD, ligand=self._LIGAND,
+        bonds=self._USER_BOND, crosslinks=self._DSSO,
+    )
+    fold_input.expand_links()
+    self.assertLen(fold_input.bonded_atom_pairs, 1)
+
+
+class CrosslinkDataJsonReuseTest(absltest.TestCase):
+  """The written _data.json must stay reusable as input for another run.
+
+  process_fold_input writes the JSON before expanding, so expansion products
+  (crosslinker ligands, XL bonds, appended CCD entries) are never serialised.
+  Re-running on the written file must reproduce the same expansion.
+  """
+
+  def setUp(self):
+    super().setUp()
+    fn = testing_data.Data(
+        resources.ROOT / 'test_data/crosslinks/9G5K/9G5K_input.json').path()
+    with open(fn, 'r') as f:
+      self._fold_input = folding_input.Input.from_json(f.read())
+
+  def _written_json(self) -> str:
+    output_dir = self.create_tempdir().full_path
+    run_alphafold.process_fold_input(
+        fold_input=self._fold_input,
+        data_pipeline_config=None,
+        model_runner=None,
+        output_dir=output_dir,
+    )
+    path = os.path.join(
+        output_dir, f'{self._fold_input.sanitised_name()}_data.json')
+    with open(path, 'r') as f:
+      return f.read()
+
+  def test_written_json_matches_input(self):
+    self.assertEqual(self._written_json(), self._fold_input.to_json())
+
+  def test_written_json_has_no_expansion_products(self):
+    written = json.loads(self._written_json())
+    self.assertIsNone(written['bondedAtomPairs'])
+    self.assertIsNone(written['userCCD'])
+    self.assertEmpty([s for s in written['sequences'] if 'ligand' in s])
+    self.assertEqual(
+        [xl['name'] for xl in written['crosslinks']], ['azide-A-DSBSO'])
+
+  def test_reused_json_expands_identically(self):
+    reused = folding_input.Input.from_json(self._written_json())
+    self.assertEqual(
+        reused.expand_links().to_json(),
+        self._fold_input.expand_links().to_json(),
+    )
+
+
+class Af3xVersionTest(absltest.TestCase):
+  """Version stamp written next to inference outputs."""
+
+  def test_write_version_info(self):
+    output_dir = self.create_tempdir().full_path
+    path = af3x_version.write_version_info(output_dir, 'job')
+    self.assertEqual(path, os.path.join(output_dir, 'job_af3x_version.json'))
+    with open(path, 'rt') as f:
+      info = json.load(f)
+    self.assertEqual(
+        info['af3_upstream_commit'], af3x_version.AF3_UPSTREAM_COMMIT
+    )
+    self.assertIn('jax', info['packages'])
+    self.assertIn('written_at', info)
+    if info['af3x_commit'] is not None:
+      self.assertRegex(info['af3x_commit'], r'^[0-9a-f]{40}$')
+      self.assertIsInstance(info['af3x_dirty'], bool)
+
+  def test_short_id(self):
+    info = af3x_version.get_version_info()
+    short_id = af3x_version.short_id()
+    if info['af3x_commit'] is None:
+      self.assertEqual(short_id, 'unknown')
+    else:
+      self.assertTrue(short_id.startswith(info['af3x_commit'][:12]))
+
 
 if __name__ == '__main__':
   absltest.main()

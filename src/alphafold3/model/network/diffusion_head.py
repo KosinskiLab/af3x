@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -21,7 +30,6 @@ from alphafold3.model.network import atom_cross_attention
 from alphafold3.model.network import diffusion_transformer
 from alphafold3.model.network import featurization
 from alphafold3.model.network import noise_level_embeddings
-import chex
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -143,7 +151,9 @@ class DiffusionHead(hk.Module):
     pair_embedding = use_conditioning * embeddings['pair']
 
     rel_features = featurization.create_relative_encoding(
-        batch.token_features, max_relative_idx=32, max_relative_chain=2
+        seq_features=batch.token_features,
+        max_relative_idx=32,
+        max_relative_chain=2,
     ).astype(pair_embedding.dtype)
     features_2d = jnp.concatenate([pair_embedding, rel_features], axis=-1)
     pair_cond = hm.Linear(
@@ -237,7 +247,6 @@ class DiffusionHead(hk.Module):
       act = enc.token_act
 
       # Token-token attention
-      chex.assert_shape(act, (None, self.config.per_token_channels))
       act = jnp.asarray(act, dtype=jnp.float32)
 
       act += hm.Linear(
@@ -326,13 +335,16 @@ def sample(
     key, key_noise, key_aug = jax.random.split(key, 3)
 
     positions = random_augmentation(
-        rng_key=key_aug, positions=positions, mask=mask
+        rng_key=key_aug, positions=positions, mask=mask  # pyrefly: ignore[bad-argument-type]
     )
 
     gamma = config.gamma_0 * (noise_level > config.gamma_min)
     t_hat = noise_level_prev * (1 + gamma)
 
-    noise_scale = config.noise_scale * jnp.sqrt(t_hat**2 - noise_level_prev**2)
+    noise_scale = config.noise_scale * jnp.sqrt(
+        # Don't take sqrt of tiny negative number (happens when running on CPU).
+        jnp.maximum(t_hat**2 - noise_level_prev**2, 0.0)
+    )
     noise = noise_scale * jax.random.normal(key_noise, positions.shape)
     positions_noisy = positions + noise
 

@@ -1,24 +1,37 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
 # if received directly from Google. Use is subject to terms of use available at
 # https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+#
+# Modified for AF3x (https://github.com/KosinskiLab/af3x).
 
 """Post-processing utilities for AlphaFold inference results."""
 
 import dataclasses
 import datetime
-import os
-
+import io
 from alphafold3 import version
+from alphafold3.common import af3x_version
 from alphafold3.model import confidence_types
 from alphafold3.model import mmcif_metadata
 from alphafold3.model import model
+from etils import epath
 import numpy as np
+import zstandard
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -46,6 +59,8 @@ class ProcessedInferenceResult:
 
 def post_process_inference_result(
     inference_result: model.InferenceResult,
+    *,
+    keep_license: bool = True,
 ) -> ProcessedInferenceResult:
   """Returns cif, confidence_1d_json, confidence_2d_json, mean_confidence_1d, and ranking confidence."""
 
@@ -53,10 +68,15 @@ def post_process_inference_result(
   timestamp = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
   cif_with_metadata = mmcif_metadata.add_metadata_to_mmcif(
       old_cif=inference_result.predicted_structure.to_mmcif_dict(),
-      version=f'{version.__version__} @ {timestamp}',
+      version=(
+          f'{version.__version__} AF3x {af3x_version.short_id()} @ {timestamp}'
+      ),
       model_id=inference_result.model_id,
+      keep_license=keep_license,
   )
-  cif = mmcif_metadata.add_legal_comment(cif_with_metadata.to_string())
+  cif = cif_with_metadata.to_string()
+  if keep_license:
+    cif = mmcif_metadata.add_legal_comment(cif)
   cif = cif.encode('utf-8')
   confidence_1d = confidence_types.AtomConfidence.from_inference_result(
       inference_result
@@ -78,7 +98,7 @@ def post_process_inference_result(
   )
   return ProcessedInferenceResult(
       cif=cif,
-      mean_confidence_1d=mean_confidence_1d,
+      mean_confidence_1d=float(mean_confidence_1d),
       ranking_score=float(inference_result.metadata['ranking_score']),
       structure_confidence_summary_json=structure_confidence_summary_json,
       structure_full_data_json=structure_full_data_json,
@@ -88,36 +108,52 @@ def post_process_inference_result(
 
 def write_output(
     inference_result: model.InferenceResult,
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
+    *,
     terms_of_use: str | None = None,
     name: str | None = None,
+    compress: bool = False,
+    keep_license: bool = True,
 ) -> None:
   """Writes processed inference result to a directory."""
-  processed_result = post_process_inference_result(inference_result)
+  processed_result = post_process_inference_result(
+      inference_result, keep_license=keep_license
+  )
 
+  output_dir = epath.Path(output_dir)
   prefix = f'{name}_' if name is not None else ''
 
-  with open(os.path.join(output_dir, f'{prefix}model.cif'), 'wb') as f:
-    f.write(processed_result.cif)
+  mmcif_path = output_dir / f'{prefix}model.cif'
+  full_confidences_path = output_dir / f'{prefix}confidences.json'
+  summary_confidences_path = output_dir / f'{prefix}summary_confidences.json'
 
-  with open(
-      os.path.join(output_dir, f'{prefix}summary_confidences.json'), 'wb'
-  ) as f:
-    f.write(processed_result.structure_confidence_summary_json)
+  def write_bytes(path: epath.Path, data: bytes):
+    if compress:
+      with path.with_suffix(path.suffix + '.zst').open('wb') as f:
+        with zstandard.ZstdCompressor().stream_writer(f) as compressor:
+          compressor.write(data)
+    else:
+      path.write_bytes(data)
 
-  with open(os.path.join(output_dir, f'{prefix}confidences.json'), 'wb') as f:
-    f.write(processed_result.structure_full_data_json)
+  write_bytes(mmcif_path, processed_result.cif)
+  write_bytes(full_confidences_path, processed_result.structure_full_data_json)
+  summary_confidences_path.write_bytes(
+      processed_result.structure_confidence_summary_json
+  )
 
   if terms_of_use is not None:
-    with open(os.path.join(output_dir, 'TERMS_OF_USE.md'), 'wt') as f:
-      f.write(terms_of_use)
+    (output_dir / 'TERMS_OF_USE.md').write_text(terms_of_use)
 
 
 def write_embeddings(
     embeddings: dict[str, np.ndarray],
-    output_dir: os.PathLike[str] | str,
+    output_dir: epath.PathLike,
+    name: str | None = None,
 ) -> None:
   """Writes embeddings to a directory."""
+  output_dir = epath.Path(output_dir)
+  prefix = f'{name}_' if name else ''
 
-  with open(os.path.join(output_dir, 'embeddings.npz'), 'wb') as f:
-    np.savez_compressed(f, **embeddings)
+  with io.BytesIO() as bio:
+    np.savez_compressed(bio, **embeddings)  # pyrefly: ignore[bad-argument-type]
+    (output_dir / f'{prefix}embeddings.npz').write_bytes(bio.getvalue())

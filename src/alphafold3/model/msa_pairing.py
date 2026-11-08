@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -23,7 +32,7 @@ The unpaired MSA:
 - Is deduplicated such that it doesn't contain any sequences in the paired MSA.
 """
 
-from typing import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from alphafold3.model import data_constants
 import numpy as np
 
@@ -125,7 +134,7 @@ def create_paired_features(
     row_indices = np.arange(len(species_ids))
     # The grouping np.split code requires that the input is already clustered
     # by species id.
-    sort_idxs = species_ids.argsort()
+    sort_idxs = species_ids.argsort(kind='stable')
     species_ids = species_ids[sort_idxs]
     row_indices = row_indices[sort_idxs]
 
@@ -168,7 +177,15 @@ def create_paired_features(
     )
     # Sort rows by the product of the original indices in the respective chain
     # MSAS, so as to rank hits that appear higher in the original MSAs higher.
-    rank_metric = np.abs(np.prod(rows.astype(np.float32), axis=1))
+    # Sum the logs instead of multiplying: with enough chains the product
+    # overflows float32, every row becomes inf and the ordering is lost.
+    # While log fixes the dynamic range, float64 is still needed for
+    # precision: two rows differing by one index k contribute ~1/k to the
+    # sum, but the float32 ULP of the sum grows as num_chains * log(k) *
+    # 2^-23. At ~100 chains and MSA depth ~10k this exceeds 1/k, losing
+    # the ability to distinguish consecutive indices.
+    with np.errstate(divide='ignore'):  # log(0) is -inf, which sorts first.
+      rank_metric = np.sum(np.log(np.abs(rows).astype(np.float64)), axis=1)
     sorted_rows = rows[np.argsort(rank_metric), :]
     all_rows.append(sorted_rows)
     num_rows_seen += rows.shape[0]
@@ -308,5 +325,5 @@ def remove_all_gapped_rows_from_all_seqs(
           # For consistency we do this for all chains even though the
           # gapped rows are based on a selected set asym_ids.
           chain[feat_name] = chain[feat_name][non_gapped_keep_rows]
-    chain['num_alignments_all_seq'] = np.sum(non_gapped_keep_rows)
+    chain['num_alignments_all_seq'] = np.sum(non_gapped_keep_rows)  # pyrefly: ignore[unsupported-operation]
   return chains_list

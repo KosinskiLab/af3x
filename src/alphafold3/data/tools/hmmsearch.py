@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -28,6 +37,7 @@ class Hmmsearch(object):
       binary_path: str,
       hmmbuild_binary_path: str,
       database_path: str,
+      n_cpu: int = 8,
       alphabet: str = 'amino',
       filter_f1: float | None = None,
       filter_f2: float | None = None,
@@ -45,6 +55,7 @@ class Hmmsearch(object):
       hmmbuild_binary_path: The path to the hmmbuild executable. Used to build
         an hmm from an input a3m.
       database_path: The path to the hmmsearch database (FASTA format).
+      n_cpu: The number of CPUs to give Hmmsearch.
       alphabet: Chain type e.g. amino, rna, dna.
       filter_f1: MSV and biased composition pre-filter, set to >1.0 to turn off.
       filter_f2: Viterbi pre-filter, set to >1.0 to turn off.
@@ -59,11 +70,12 @@ class Hmmsearch(object):
     Raises:
       RuntimeError: If hmmsearch binary not found within the path.
     """
-    self.binary_path = binary_path
-    self.hmmbuild_runner = hmmbuild.Hmmbuild(
+    self._binary_path = binary_path
+    self._hmmbuild_runner = hmmbuild.Hmmbuild(
         alphabet=alphabet, binary_path=hmmbuild_binary_path
     )
-    self.database_path = database_path
+    self._database_path = database_path
+    self._n_cpu = n_cpu
     flags = []
     if filter_max:
       flags.append('--max')
@@ -84,13 +96,13 @@ class Hmmsearch(object):
     if incdom_e is not None:
       flags.extend(('--incdomE', incdom_e))
 
-    self.flags = tuple(map(str, flags))
+    self._flags = tuple(map(str, flags))
 
     subprocess_utils.check_binary_exists(
-        path=self.binary_path, name='hmmsearch'
+        path=self._binary_path, name='hmmsearch'
     )
 
-    if not os.path.exists(self.database_path):
+    if not os.path.exists(self._database_path):
       logging.error('Could not find hmmsearch database %s', database_path)
       raise ValueError(f'Could not find hmmsearch database {database_path}')
 
@@ -103,22 +115,22 @@ class Hmmsearch(object):
         f.write(hmm)
 
       cmd = [
-          self.binary_path,
+          self._binary_path,
           '--noali',  # Don't include the alignment in stdout.
-          *('--cpu', '8'),
+          *('--cpu', str(self._n_cpu)),
       ]
       # If adding flags, we have to do so before the output and input:
-      if self.flags:
-        cmd.extend(self.flags)
+      if self._flags:
+        cmd.extend(self._flags)
       cmd.extend([
           *('-A', sto_out_path),
           hmm_input_path,
-          self.database_path,
+          self._database_path,
       ])
 
       subprocess_utils.run(
           cmd=cmd,
-          cmd_name=f'Hmmsearch ({os.path.basename(self.database_path)})',
+          cmd_name=f'Hmmsearch ({os.path.basename(self._database_path)})',
           log_stdout=False,
           log_stderr=True,
           log_on_process_error=True,
@@ -136,14 +148,14 @@ class Hmmsearch(object):
 
     # Only the "fast" model construction makes sense with A3M, as it doesn't
     # have any way to annotate reference columns.
-    hmm = self.hmmbuild_runner.build_profile_from_a3m(a3m_in)
+    hmm = self._hmmbuild_runner.build_profile_from_a3m(a3m_in)
     return self.query_with_hmm(hmm)
 
   def query_with_sto(
       self, msa_sto: str, model_construction: str = 'fast'
   ) -> str:
     """Queries the database using hmmsearch using a given stockholm msa."""
-    hmm = self.hmmbuild_runner.build_profile_from_sto(
+    hmm = self._hmmbuild_runner.build_profile_from_sto(
         msa_sto, model_construction=model_construction
     )
     return self.query_with_hmm(hmm)

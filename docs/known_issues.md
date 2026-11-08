@@ -13,3 +13,93 @@ Between commits https://github.com/google-deepmind/alphafold3/commit/f8df1c7 and
 https://github.com/google-deepmind/alphafold3/commit/4e4023c, AlphaFold 3
 handled incorrectly any two-letter atoms (e.g. Cl, Br) in ligands defined using
 SMILES strings.
+
+## Linked ketoses keep their leaving atom
+
+When a glycan component is bonded to another residue using `bondedAtomPairs`,
+AlphaFold 3 removes the atom named `O1` from it (unless `O1` itself takes part
+in the bond). The CCD leaving-atom flag
+(`_chem_comp_atom.pdbx_leaving_atom_flag`) is not used to pick the atom. This
+matches aldoses such as glucose, galactose or mannose, whose anomeric carbon is
+`C1` and whose leaving atom is `O1`. It does not match ketoses, whose anomeric
+carbon is `C2` and whose leaving atom is `O2`:
+
+*   Sialic acids (e.g. `SIA`, `SLB`, `NGC`, `KDN`) and `KDO` have no atom named
+    `O1`, so nothing is removed and `O2` is kept.
+*   Fructose, psicose, sorbose and tagatose (e.g. `FRU`, `BDF`, `PSV`, `SOE`,
+    `T6T`) have a C1 hydroxyl named `O1`, which is removed while `O2` is kept.
+
+In both cases the linked `C2` ends up with five heavy-atom neighbours. See
+https://github.com/google-deepmind/alphafold3/issues/752 for details.
+
+As a workaround, provide the ketose as a
+[user-provided CCD](input.md#user-provided-ccd) component under a new name, with
+`O2`, `HO2` and their bonds removed. Components that are not in the CCD glycan
+sets have no atoms removed, so `O1` is also kept.
+
+## MSA discrepancy between AlphaFold 3 and AlphaFold Server
+
+### The root cause of the problem
+
+The released AlphaFold 3 and AlphaFold Server use the same model weights and
+equivalent featurisation and model code. However, the way they run genetic
+search is slightly different. The released AlphaFold 3 searches each database in
+one go, while AlphaFold Server has a sharded version of each database (split
+into multiple smaller FASTA files) and searches all of the shards in parallel.
+The results of these parallel searches are then merged together at the end.
+
+The discrepancy is caused by a different (deeper) MSA on AlphaFold Server in
+some cases. We discovered that the issue is caused by running sharded Jackhmmer
+in AlphaFold Server without the `--domZ` flag (has to be set together with the
+`--Z` flag and set to the same value) which means that effectively the AlphaFold
+Server is running with roughly 100× more permissive `--domE` filter. This means
+more sequences are sometimes included in the MSA.
+
+We are keeping behaviour unchanged in both the released AlphaFold 3 and in the
+AlphaFold Server, however, we are giving users with local installs an option to
+replicate AlphaFold Server behaviour locally. In our large scale tests the
+difference did not matter, it is only very specific inputs that get better
+accuracy with the deeper MSA.
+
+See https://github.com/google-deepmind/alphafold3/issues/492 for an example
+input where a protein-DNA complex gets significantly higher ipTM and pTM with
+AlphaFold Server compared to a local run.
+
+### Replicating AlphaFold Server behaviour locally
+
+If you want to replicate AlphaFold Server behaviour (i.e. better folding
+accuracy in some cases), you can increase the value of the Jackhmmer/Nhmmer
+`--domE` flag by 100× compared to its default value.
+
+Alternatively, you can run the sharded MSA search while not setting the `--domZ`
+value – you would have to modify the code to do it. We added support for
+searching against sharded databases in AlphaFold 3 in
+https://github.com/google-deepmind/alphafold3/commit/805adc3863841d83d631ccd18136ad58ce3ecb34
+and the way to run AlphaFold 3 with sharded databases is documented in
+https://github.com/google-deepmind/alphafold3/blob/main/docs/performance.md#sharded-genetic-databases.
+It can provide 10–30× speedup (potentially even more, depending on hardware) of
+the genetic search.
+
+In general, we recommend experimenting with MSA if you are seeing a prediction
+with low predicted confidence. Typically adding more *relevant* sequences in the
+MSA will increase AlphaFold prediction accuracy and model confidence scores.
+
+### Gated Linear Unit Tokamax `NotImplementedError`
+
+When running AlphaFold 3 in certain configurations (e.g. on Mac OS with the MPS
+backend), you might see errors like this:
+
+```
+NotImplementedError: Not supported on gpu.
+Failed to run implementation
+Traceback (most recent call last):
+File "tokamax/_src/ops/gated_linear_unit/api.py", line 114, in gated_linear_unit
+  return fn(x, weights, activation=activation, precision=precision)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "tokamax/_src/ops/op.py", line 197, in __call__
+  raise NotImplementedError(f"Not supported on {device.device_kind}.")
+NotImplementedError: Not supported on gpu.
+```
+
+Tokamax will the chose another implementation and run the prediction
+successfully, so these are safe to ignore.

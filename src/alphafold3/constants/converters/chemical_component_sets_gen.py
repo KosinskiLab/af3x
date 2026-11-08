@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -12,26 +21,25 @@
 
 from collections.abc import Mapping, Sequence
 import pathlib
-import pickle
 import re
 import sys
 
 from alphafold3.common import resources
+import msgpack
 import tqdm
 
-
-_CCD_PICKLE_FILE = resources.filename(
-    'constants/converters/ccd.pickle'
+_CCD_MSGPACK_FILE = resources.filename(
+    resources.ROOT / 'constants/converters/ccd.msgpack'
 )
 
 
 def find_ions_and_glycans_in_ccd(
     ccd: Mapping[str, Mapping[str, Sequence[str]]],
-) -> dict[str, frozenset[str]]:
+) -> dict[str, Sequence[str]]:
   """Finds glycans and ions in all version of CCD."""
-  glycans_linking = []
-  glycans_other = []
-  ions = []
+  glycans_linking: list[str] = []
+  glycans_other: list[str] = []
+  ions: list[str] = []
   for name, comp in tqdm.tqdm(ccd.items(), disable=None):
     if name == 'UNX':
       continue  # Skip "unknown atom or ion".
@@ -48,13 +56,11 @@ def find_ions_and_glycans_in_ccd(
     comp_name = comp['_chem_comp.name'][0].lower()
     if re.findall(r'\bion\b', comp_name):
       ions.append(name)
-  result = dict(
-      glycans_linking=frozenset(glycans_linking),
-      glycans_other=frozenset(glycans_other),
-      ions=frozenset(ions),
+  return dict(
+      glycans_linking=glycans_linking,
+      glycans_other=glycans_other,
+      ions=ions,
   )
-
-  return result
 
 
 def main(argv: Sequence[str]) -> None:
@@ -63,16 +69,16 @@ def main(argv: Sequence[str]) -> None:
         'Directory to write to must be specified as a command-line arguments.'
     )
 
-  print(f'Loading {_CCD_PICKLE_FILE}', flush=True)
-  with open(_CCD_PICKLE_FILE, 'rb') as f:
-    ccd: Mapping[str, Mapping[str, Sequence[str]]] = pickle.load(f)
+  print(f'Loading {_CCD_MSGPACK_FILE}', flush=True)
+  with open(_CCD_MSGPACK_FILE, 'rb') as f:
+    ccd: Mapping[str, Mapping[str, Sequence[str]]] = msgpack.unpack(f)
   output_path = pathlib.Path(argv[1])
   output_path.parent.mkdir(exist_ok=True)
   print('Finding ions and glycans', flush=True)
   result = find_ions_and_glycans_in_ccd(ccd)
   print(f'writing to {output_path}', flush=True)
   with output_path.open('wb') as f:
-    pickle.dump(result, f)
+    msgpack.pack(result, f)
   print('Done', flush=True)
 
 
