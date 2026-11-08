@@ -474,9 +474,9 @@ _REMOVE_OVERLAPPING_CROSSLINKS = flags.DEFINE_bool(
 _ABLATE_CROSSLINKERS = flags.DEFINE_bool(
   'ablate_crosslinkers',
   False,
-  'If set, zero XL token embeddings and masks before diffusion so XL atoms'
-  ' are excluded from the predicted structure while still informing the'
-  ' Evoformer. See local/experiments/step0_nocl/PLAN.md.',
+  'Control experiment: if set, XL tokens are zeroed before the diffusion'
+  ' module, so the XL ligand chains are left out of the predicted structure.'
+  ' The trunk (Evoformer) still sees them.',
 )
 
 def make_model_config(

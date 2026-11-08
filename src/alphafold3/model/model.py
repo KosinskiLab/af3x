@@ -288,10 +288,9 @@ class Model(hk.Module):
     # Experimental: skip Evoformer and use pre-computed embeddings from the batch
     # dict under keys '__injected_single__' and '__injected_pair__'.
     inject_embeddings: bool = False
-    # Experimental: zero XL (is_ligand proxy) embeddings and masks before
-    # diffusion so XL atoms are excluded from the predicted structure while
-    # still informing the Evoformer pair/single representations.
-    # See local/experiments/step0_nocl/PLAN.md.
+    # Control experiment: zero XL token embeddings (is_crosslinker) and masks
+    # before diffusion, so XL atoms are left out of the predicted structure
+    # while still informing the Evoformer pair/single representations.
     ablate_crosslinkers: bool = False
 
   def __init__(self, config: Config, name: str = 'diffuser'):
