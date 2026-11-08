@@ -23,4 +23,4 @@ AF3x is a fork of AlphaFold 3 and is not affiliated with or endorsed by Google D
 | [AlphaFold 3 documentation](installation.md) | Upstream pages (v3.0.5) |
 
 Source code: [KosinskiLab/af3x](https://github.com/KosinskiLab/af3x). Preprint:
-[Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v2).
+[Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v4).

@@ -5,6 +5,8 @@
 
 # AF3x: AlphaFold 3 with explicit crosslinks
 
+**[Documentation](https://kosinskilab.github.io/af3x/) | [Preprint](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v4)**
+
 AF3x models chemical crosslinks (XLs) explicitly: each crosslinker is added as a ligand, covalently bonded to both
 crosslinked residues. Other XL-based modelling tools use distance restraints between the residues instead.
 
@@ -12,8 +14,6 @@ Research software under active development. AF3x is a fork of AlphaFold 3 and is
 by Google DeepMind.
 
 **Current version:** `af3x-v0.3.0`, based on AlphaFold 3 v3.0.5 ([all versions](docs/af3x/versions.md)).
-
-Preprint: [Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v2).
 
 This README has two parts: AF3x (this part) and the [original AlphaFold 3 README](#alphafold-3) below it.
 
@@ -59,7 +59,7 @@ Input format and reactive residues: [Crosslink input](docs/af3x/crosslink_input.
 ## Citing AF3x
 
 If you use AF3x, cite the AF3x preprint
-([Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v2))
+([Improving AlphaFold 3 structural modeling by incorporating explicit crosslinks](https://www.biorxiv.org/content/10.1101/2024.12.03.626671v4))
 and AlphaFold 3 ([citation below](#citing-this-work)).
 
 ## Licence and terms
